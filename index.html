@@ -125,6 +125,39 @@
   .dropdown-menu button:hover{ background:#F1EDE3; }
   .dropdown-menu .menu-hint{ font-size:11px; color:var(--ink-soft); padding:2px 10px 6px 10px; }
 
+  .card .badge{
+    display:inline-block; font-size:10px; font-weight:600; text-transform:uppercase;
+    letter-spacing:.04em; padding:2px 7px; border-radius:20px; margin-top:6px;
+  }
+  .badge-gestion{ background:#F3E7C9; color:#8A6414; }
+  .badge-pedagogico{ background:#D9E9E6; color:#255A52; }
+
+  .filter-group{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .filter-group button{
+    background:var(--paper); border:none; padding:9px 12px; font-size:12.5px; font-weight:600;
+    color:var(--ink-soft); border-right:1px solid var(--line);
+  }
+  .filter-group button:last-child{ border-right:none; }
+  .filter-group button.active{ background:var(--ink); color:#fff; }
+  .filter-group button:hover:not(.active){ background:#F1EDE3; }
+  .card-wrap.dimmed{ opacity:.16; }
+  .card-wrap.dimmed .link-handle{ display:none; }
+
+  .field .radio-row{ display:flex; gap:8px; }
+  .field .radio-row label{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    border:1px solid var(--line); border-radius:7px; padding:8px 6px; font-size:12.5px;
+    font-weight:500; text-transform:none; letter-spacing:normal; color:var(--ink); cursor:pointer;
+  }
+  .field .radio-row input{ width:auto; margin:0; }
+  .field .radio-row label:has(input:checked){ border-color:var(--ink); background:#F1EDE3; }
+  .field textarea{
+    width:100%; padding:9px 10px; border-radius:7px; border:1px solid var(--line);
+    font-family:'IBM Plex Sans', sans-serif; font-size:13.5px; background:#FBFAF7; color:var(--ink);
+    resize:vertical; min-height:70px;
+  }
+  .field textarea:focus{ outline:2px solid var(--ring); outline-offset:1px; }
+
   .toast{
     position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
     background: var(--ink); color:#fff; padding:10px 18px; border-radius:8px; font-size:13px;
@@ -158,6 +191,13 @@
   </header>
 
   <div class="legend" id="legend"></div>
+  <div class="legend" id="filterBar" style="border-top:none; padding-top:0;">
+    <div class="filter-group" id="filterGroup">
+      <button data-filter="all" class="active">Todos</button>
+      <button data-filter="gestion">● Gestión</button>
+      <button data-filter="pedagogico">● Pedagógico</button>
+    </div>
+  </div>
 
   <div class="canvas-wrap" id="canvasWrap">
     <div id="canvasContent">
@@ -172,11 +212,24 @@
     <form id="nodeForm">
       <div class="field">
         <label for="fName">Nombre del cargo</label>
-        <input id="fName" type="text" placeholder="Ej: Vicedirección" required>
+        <input id="fName" type="text" placeholder="Ej: Vicedirección">
       </div>
       <div class="field">
         <label for="fRole">Persona / detalle (opcional)</label>
         <input id="fRole" type="text" placeholder="Ej: Prof. María Gómez">
+      </div>
+      <div class="field">
+        <label>Área</label>
+        <div class="radio-row">
+          <label><input type="radio" name="fArea" value=""> Sin asignar</label>
+          <label><input type="radio" name="fArea" value="gestion"> Gestión</label>
+          <label><input type="radio" name="fArea" value="pedagogico"> Pedagógico</label>
+        </div>
+      </div>
+      <div class="field" id="bulkField">
+        <label for="fBulk">¿Son varios cargos del mismo nivel? Cargalos juntos</label>
+        <textarea id="fBulk" placeholder="Un nombre por línea, por ejemplo:&#10;Director de Área 1&#10;Director de Área 2&#10;Director de Área 3"></textarea>
+        <div class="field-note">Si completás esto, se ignora el campo "Nombre del cargo" de arriba y se crea un cargo por cada línea, todos al mismo nivel y con la misma Área.</div>
       </div>
       <div class="field">
         <label for="fParent">Depende de (línea sólida)</label>
@@ -209,6 +262,7 @@ let state = { nodes: [], levelNames: {} };
 let editingId = null;
 let dragState = null;
 let linkState = null;
+let currentFilter = 'all';
 
 function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
 function toast(msg){
@@ -262,12 +316,12 @@ function newNodePosition(parentId){
 }
 
 function seed(){
-  const dir = { id: uid(), name: 'Dirección', role: '', parentId: null, secondaryParentIds: [] };
-  const vice = { id: uid(), name: 'Vicedirección', role: '', parentId: dir.id, secondaryParentIds: [] };
-  const sec = { id: uid(), name: 'Secretaría', role: '', parentId: dir.id, secondaryParentIds: [] };
-  const coordPed = { id: uid(), name: 'Coordinación Pedagógica', role: '', parentId: vice.id, secondaryParentIds: [] };
-  const coordAdm = { id: uid(), name: 'Coordinación Administrativa', role: '', parentId: vice.id, secondaryParentIds: [] };
-  const docentes = { id: uid(), name: 'Cuerpo Docente', role: '', parentId: coordPed.id, secondaryParentIds: [] };
+  const dir = { id: uid(), name: 'Dirección', role: '', parentId: null, secondaryParentIds: [], area: null };
+  const vice = { id: uid(), name: 'Vicedirección', role: '', parentId: dir.id, secondaryParentIds: [], area: 'gestion' };
+  const sec = { id: uid(), name: 'Secretaría', role: '', parentId: dir.id, secondaryParentIds: [], area: 'gestion' };
+  const coordPed = { id: uid(), name: 'Coordinación Pedagógica', role: '', parentId: vice.id, secondaryParentIds: [], area: 'pedagogico' };
+  const coordAdm = { id: uid(), name: 'Coordinación Administrativa', role: '', parentId: vice.id, secondaryParentIds: [], area: 'gestion' };
+  const docentes = { id: uid(), name: 'Cuerpo Docente', role: '', parentId: coordPed.id, secondaryParentIds: [], area: 'pedagogico' };
   state.nodes = [dir, vice, sec, coordPed, coordAdm, docentes];
   state.levelNames = { 0: 'Dirección General', 1: 'Gestión', 2: 'Coordinación', 3: 'Equipo' };
   autoLayout();
@@ -280,7 +334,10 @@ async function loadState(){
       const parsed = JSON.parse(res.value);
       if(parsed && Array.isArray(parsed.nodes)){
         state = parsed;
-        state.nodes.forEach(n => { if(!Array.isArray(n.secondaryParentIds)) n.secondaryParentIds = []; });
+        state.nodes.forEach(n => {
+          if(!Array.isArray(n.secondaryParentIds)) n.secondaryParentIds = [];
+          if(n.area === undefined) n.area = null;
+        });
         if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
         return;
       }
@@ -313,8 +370,11 @@ function render(){
   let cardsHtml = '';
   state.nodes.forEach(node => {
     const depth = depthOf(node.id);
+    const dimmed = currentFilter !== 'all' && node.area !== currentFilter;
+    const badge = node.area === 'gestion' ? `<div class="badge badge-gestion">Gestión</div>`
+      : node.area === 'pedagogico' ? `<div class="badge badge-pedagogico">Pedagógico</div>` : '';
     cardsHtml += `
-      <div class="card-wrap" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
+      <div class="card-wrap${dimmed ? ' dimmed' : ''}" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
         <div class="card" style="border-left-color:${colorVar(depth)}">
           <div class="card-actions">
             <button class="icon-btn" data-action="dup" data-id="${node.id}" title="Duplicar">⎘</button>
@@ -323,6 +383,7 @@ function render(){
           </div>
           <div class="name">${escapeHtml(node.name)}</div>
           ${node.role ? `<div class="role">${escapeHtml(node.role)}</div>` : ''}
+          ${badge}
         </div>
         <div class="link-handle" title="Arrastrá para vincular a otro cargo"></div>
       </div>`;
@@ -359,6 +420,7 @@ function renderLegend(){
   const depths = [...new Set(state.nodes.map(n => depthOf(n.id)))].sort((a,b)=>a-b);
   const legend = document.getElementById('legend');
   const hasSecondary = state.nodes.some(n => (n.secondaryParentIds||[]).length);
+  const hasArea = state.nodes.some(n => n.area);
   if(!depths.length){
     legend.innerHTML = `<span class="legend-empty">Los niveles aparecen automáticamente a medida que agregás cargos.</span>`;
     return;
@@ -370,6 +432,12 @@ function renderLegend(){
       <span contenteditable="true" data-depth="${d}" class="level-label">${escapeHtml(label)}</span>
     </div>`;
   }).join('');
+  if(hasArea){
+    html += `<div class="legend-item" style="border-left:1px solid var(--line); padding-left:16px;">
+      <span class="badge badge-gestion" style="margin-top:0;">Gestión</span>
+      <span class="badge badge-pedagogico" style="margin-top:0;">Pedagógico</span>
+    </div>`;
+  }
   if(hasSecondary){
     html += `<div class="legend-item" style="border-left:1px solid var(--line); padding-left:16px;">
       <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#3E7C74" stroke-width="2" stroke-dasharray="5,4"/></svg>
@@ -596,6 +664,8 @@ function openModal(nodeId, parentPreset){
   const delBtn = document.getElementById('btnDelete');
   const nameInput = document.getElementById('fName');
   const roleInput = document.getElementById('fRole');
+  const bulkField = document.getElementById('bulkField');
+  document.getElementById('fBulk').value = '';
 
   if(nodeId){
     const node = nodeById(nodeId);
@@ -605,6 +675,8 @@ function openModal(nodeId, parentPreset){
     populateParentSelect(nodeId);
     document.getElementById('fParent').value = node.parentId || '';
     delBtn.style.display = 'inline-flex';
+    bulkField.style.display = 'none';
+    document.querySelector(`input[name="fArea"][value="${node.area || ''}"]`).checked = true;
   } else {
     title.textContent = 'Nuevo cargo';
     nameInput.value = '';
@@ -612,6 +684,8 @@ function openModal(nodeId, parentPreset){
     populateParentSelect(null);
     document.getElementById('fParent').value = parentPreset || '';
     delBtn.style.display = 'none';
+    bulkField.style.display = 'block';
+    document.querySelector('input[name="fArea"][value=""]').checked = true;
   }
   populateSecondaryList(nodeId);
   overlay.classList.add('open');
@@ -626,14 +700,25 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
   const role = document.getElementById('fRole').value.trim();
   const parentId = document.getElementById('fParent').value || null;
   const secondaryParentIds = Array.from(document.querySelectorAll('#secondaryList input:checked')).map(i => i.value);
-  if(!name) return;
+  const area = document.querySelector('input[name="fArea"]:checked').value || null;
+  const bulkRaw = document.getElementById('fBulk').value;
+  const bulkNames = bulkRaw.split('\n').map(s => s.trim()).filter(Boolean);
 
   if(editingId){
     const node = nodeById(editingId);
-    node.name = name; node.role = role; node.parentId = parentId; node.secondaryParentIds = secondaryParentIds;
+    if(!name){ toast('Poné un nombre para el cargo.'); return; }
+    node.name = name; node.role = role; node.parentId = parentId;
+    node.secondaryParentIds = secondaryParentIds; node.area = area;
+  } else if(bulkNames.length){
+    bulkNames.forEach(n => {
+      const pos = newNodePosition(parentId);
+      state.nodes.push({ id: uid(), name: n, role: '', parentId, secondaryParentIds: [...secondaryParentIds], area, x: pos.x, y: pos.y });
+    });
+    toast(`${bulkNames.length} cargos agregados, todos al mismo nivel.`);
   } else {
+    if(!name){ toast('Poné un nombre, o usá el campo de varios cargos.'); return; }
     const pos = newNodePosition(parentId);
-    state.nodes.push({ id: uid(), name, role, parentId, secondaryParentIds, x: pos.x, y: pos.y });
+    state.nodes.push({ id: uid(), name, role, parentId, secondaryParentIds, area, x: pos.x, y: pos.y });
   }
   await saveState();
   closeModal();
@@ -669,6 +754,15 @@ document.getElementById('btnReset').addEventListener('click', async () => {
   if(!confirm('Esto borra todo el organigrama actual. ¿Continuar?')) return;
   state = { nodes: [], levelNames: {} };
   await saveState();
+  render();
+});
+
+/* ---------- filter ---------- */
+document.getElementById('filterGroup').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-filter]');
+  if(!btn) return;
+  currentFilter = btn.getAttribute('data-filter');
+  document.querySelectorAll('#filterGroup button').forEach(b => b.classList.toggle('active', b === btn));
   render();
 });
 
