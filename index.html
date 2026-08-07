@@ -53,6 +53,21 @@
   #linksSvg{ position:absolute; top:0; left:0; pointer-events:none; }
   .link-path{ pointer-events:stroke; cursor:pointer; }
   .link-path:hover{ stroke: var(--danger) !important; stroke-width:3; }
+  .link-path.secondary{ stroke-dasharray: 6,5; }
+  .link-path.secondary:hover{ stroke: var(--danger) !important; }
+
+  .field .sub-list{
+    max-height:130px; overflow-y:auto; border:1px solid var(--line); border-radius:7px;
+    background:#FBFAF7; padding:4px;
+  }
+  .sub-list label{
+    display:flex; align-items:center; gap:8px; padding:6px 7px; border-radius:5px;
+    font-size:13px; font-weight:400; text-transform:none; letter-spacing:normal; color:var(--ink);
+  }
+  .sub-list label:hover{ background:#F1EDE3; }
+  .sub-list input{ width:auto; }
+  .sub-list-empty{ padding:8px 7px; font-size:12.5px; color:var(--ink-soft); font-style:italic; }
+  .field .field-note{ font-size:11.5px; color:var(--ink-soft); margin-top:5px; font-weight:400; text-transform:none; letter-spacing:normal; }
 
   .empty-state{ max-width:380px; margin:80px auto; text-align:center; color: var(--ink-soft); position:relative; }
   .empty-state h2{ font-family:'Fraunces', serif; color: var(--ink); font-size:20px; margin-bottom:6px;}
@@ -123,7 +138,7 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional</h1>
-      <p>Arrastrá una tarjeta para moverla. Arrastrá desde el punto ⇓ de abajo hacia otra tarjeta para crear el vínculo de dependencia. Clic en una línea para quitarla.</p>
+      <p>Arrastrá una tarjeta para moverla. Arrastrá desde el punto ⇓ hacia otra tarjeta para vincularla como dependencia principal (línea sólida). Mantené <strong>Shift</strong> mientras arrastrás para agregar una dependencia secundaria (línea punteada, para cuando alguien reporta a dos personas). Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <button class="btn btn-ghost" id="btnArrange">Reacomodar</button>
@@ -164,8 +179,13 @@
         <input id="fRole" type="text" placeholder="Ej: Prof. María Gómez">
       </div>
       <div class="field">
-        <label for="fParent">Depende de</label>
+        <label for="fParent">Depende de (línea sólida)</label>
         <select id="fParent"></select>
+      </div>
+      <div class="field">
+        <label>También depende de (línea punteada, opcional)</label>
+        <div class="sub-list" id="secondaryList"></div>
+        <div class="field-note">Marcá otros cargos si esta persona reporta a más de un superior.</div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-danger" id="btnDelete" style="display:none;">Eliminar</button>
@@ -242,12 +262,12 @@ function newNodePosition(parentId){
 }
 
 function seed(){
-  const dir = { id: uid(), name: 'Dirección', role: '', parentId: null };
-  const vice = { id: uid(), name: 'Vicedirección', role: '', parentId: dir.id };
-  const sec = { id: uid(), name: 'Secretaría', role: '', parentId: dir.id };
-  const coordPed = { id: uid(), name: 'Coordinación Pedagógica', role: '', parentId: vice.id };
-  const coordAdm = { id: uid(), name: 'Coordinación Administrativa', role: '', parentId: vice.id };
-  const docentes = { id: uid(), name: 'Cuerpo Docente', role: '', parentId: coordPed.id };
+  const dir = { id: uid(), name: 'Dirección', role: '', parentId: null, secondaryParentIds: [] };
+  const vice = { id: uid(), name: 'Vicedirección', role: '', parentId: dir.id, secondaryParentIds: [] };
+  const sec = { id: uid(), name: 'Secretaría', role: '', parentId: dir.id, secondaryParentIds: [] };
+  const coordPed = { id: uid(), name: 'Coordinación Pedagógica', role: '', parentId: vice.id, secondaryParentIds: [] };
+  const coordAdm = { id: uid(), name: 'Coordinación Administrativa', role: '', parentId: vice.id, secondaryParentIds: [] };
+  const docentes = { id: uid(), name: 'Cuerpo Docente', role: '', parentId: coordPed.id, secondaryParentIds: [] };
   state.nodes = [dir, vice, sec, coordPed, coordAdm, docentes];
   state.levelNames = { 0: 'Dirección General', 1: 'Gestión', 2: 'Coordinación', 3: 'Equipo' };
   autoLayout();
@@ -260,6 +280,7 @@ async function loadState(){
       const parsed = JSON.parse(res.value);
       if(parsed && Array.isArray(parsed.nodes)){
         state = parsed;
+        state.nodes.forEach(n => { if(!Array.isArray(n.secondaryParentIds)) n.secondaryParentIds = []; });
         if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
         return;
       }
@@ -296,6 +317,7 @@ function render(){
       <div class="card-wrap" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
         <div class="card" style="border-left-color:${colorVar(depth)}">
           <div class="card-actions">
+            <button class="icon-btn" data-action="dup" data-id="${node.id}" title="Duplicar">⎘</button>
             <button class="icon-btn" data-action="add" data-id="${node.id}" title="Agregar subordinado">+</button>
             <button class="icon-btn" data-action="edit" data-id="${node.id}" title="Editar">✎</button>
           </div>
@@ -313,6 +335,20 @@ function render(){
   content.querySelectorAll('[data-action="add"]').forEach(b=>{
     b.addEventListener('click', e => { e.stopPropagation(); openModal(null, b.getAttribute('data-id')); });
   });
+  content.querySelectorAll('[data-action="dup"]').forEach(b=>{
+    b.addEventListener('click', async e => {
+      e.stopPropagation();
+      const src = nodeById(b.getAttribute('data-id'));
+      const copy = {
+        ...src, id: uid(), name: src.name + ' (copia)',
+        x: src.x + 40, y: src.y + 40, secondaryParentIds: [...(src.secondaryParentIds||[])]
+      };
+      state.nodes.push(copy);
+      await saveState();
+      render();
+      toast('Cargo duplicado. Podés renombrarlo y arrastrarlo donde quieras.');
+    });
+  });
 
   updateCanvasSize();
   drawLinks();
@@ -322,17 +358,25 @@ function render(){
 function renderLegend(){
   const depths = [...new Set(state.nodes.map(n => depthOf(n.id)))].sort((a,b)=>a-b);
   const legend = document.getElementById('legend');
+  const hasSecondary = state.nodes.some(n => (n.secondaryParentIds||[]).length);
   if(!depths.length){
     legend.innerHTML = `<span class="legend-empty">Los niveles aparecen automáticamente a medida que agregás cargos.</span>`;
     return;
   }
-  legend.innerHTML = depths.map(d => {
+  let html = depths.map(d => {
     const label = state.levelNames[d] || `Nivel ${d+1}`;
     return `<div class="legend-item">
       <span class="legend-dot" style="background:${colorVar(d)}"></span>
       <span contenteditable="true" data-depth="${d}" class="level-label">${escapeHtml(label)}</span>
     </div>`;
   }).join('');
+  if(hasSecondary){
+    html += `<div class="legend-item" style="border-left:1px solid var(--line); padding-left:16px;">
+      <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#3E7C74" stroke-width="2" stroke-dasharray="5,4"/></svg>
+      <span>Dependencia secundaria</span>
+    </div>`;
+  }
+  legend.innerHTML = html;
   legend.querySelectorAll('.level-label').forEach(el => {
     el.addEventListener('blur', async () => {
       const d = el.getAttribute('data-depth');
@@ -358,27 +402,39 @@ function drawLinks(){
   const svg = document.getElementById('linksSvg');
   const content = document.getElementById('canvasContent');
   let paths = '';
-  state.nodes.forEach(n=>{
-    if(!n.parentId) return;
-    const parentEl = content.querySelector(`.card-wrap[data-id="${n.parentId}"] .card`);
-    const childEl = content.querySelector(`.card-wrap[data-id="${n.id}"] .card`);
-    const parentWrap = content.querySelector(`.card-wrap[data-id="${n.parentId}"]`);
-    const childWrap = content.querySelector(`.card-wrap[data-id="${n.id}"]`);
-    if(!parentEl || !childEl) return;
+
+  function pathBetween(fromId, toId){
+    const parentWrap = content.querySelector(`.card-wrap[data-id="${fromId}"]`);
+    const parentEl = content.querySelector(`.card-wrap[data-id="${fromId}"] .card`);
+    const childWrap = content.querySelector(`.card-wrap[data-id="${toId}"]`);
+    if(!parentWrap || !childWrap) return null;
     const x1 = parentWrap.offsetLeft + parentWrap.offsetWidth/2;
     const y1 = parentWrap.offsetTop + parentEl.offsetHeight;
     const x2 = childWrap.offsetLeft + childWrap.offsetWidth/2;
     const y2 = childWrap.offsetTop;
     const midY = (y1+y2)/2;
-    paths += `<path d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" class="link-path" data-child="${n.id}" stroke="#C9C2AE" stroke-width="2" fill="none"/>`;
+    return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+  }
+
+  state.nodes.forEach(n=>{
+    if(n.parentId){
+      const d = pathBetween(n.parentId, n.id);
+      if(d) paths += `<path d="${d}" class="link-path" data-child="${n.id}" stroke="#C9C2AE" stroke-width="2" fill="none"/>`;
+    }
+    (n.secondaryParentIds||[]).forEach(secId => {
+      const d = pathBetween(secId, n.id);
+      if(d) paths += `<path d="${d}" class="link-path secondary" data-child="${n.id}" data-secparent="${secId}" stroke="#3E7C74" stroke-width="2" fill="none"/>`;
+    });
   });
+
   if(linkState && linkState.tempX !== undefined){
     const srcWrap = content.querySelector(`.card-wrap[data-id="${linkState.sourceId}"]`);
     const srcCard = content.querySelector(`.card-wrap[data-id="${linkState.sourceId}"] .card`);
     if(srcWrap){
       const x1 = srcWrap.offsetLeft + srcWrap.offsetWidth/2;
       const y1 = srcWrap.offsetTop + srcCard.offsetHeight;
-      paths += `<path d="M ${x1} ${y1} L ${linkState.tempX} ${linkState.tempY}" stroke="#22314F" stroke-width="2" stroke-dasharray="5,4" fill="none"/>`;
+      const color = linkState.mode === 'secondary' ? '#3E7C74' : '#22314F';
+      paths += `<path d="M ${x1} ${y1} L ${linkState.tempX} ${linkState.tempY}" stroke="${color}" stroke-width="2" stroke-dasharray="5,4" fill="none"/>`;
     }
   }
   svg.innerHTML = paths;
@@ -390,10 +446,20 @@ function drawLinks(){
       e.stopPropagation();
       const childId = p.getAttribute('data-child');
       const node = nodeById(childId);
-      if(confirm(`¿Quitar el vínculo de "${node.name}"? Pasará a ser de nivel superior (raíz).`)){
-        node.parentId = null;
-        await saveState();
-        render();
+      const secParent = p.getAttribute('data-secparent');
+      if(secParent){
+        const secNode = nodeById(secParent);
+        if(confirm(`¿Quitar la dependencia secundaria de "${node.name}" con "${secNode.name}"?`)){
+          node.secondaryParentIds = node.secondaryParentIds.filter(id => id !== secParent);
+          await saveState();
+          render();
+        }
+      } else {
+        if(confirm(`¿Quitar el vínculo principal de "${node.name}"? Pasará a ser de nivel superior (raíz).`)){
+          node.parentId = null;
+          await saveState();
+          render();
+        }
       }
     });
   });
@@ -404,7 +470,7 @@ document.getElementById('canvasContent').addEventListener('pointerdown', e => {
   const handle = e.target.closest('.link-handle');
   if(handle){
     const wrap = handle.closest('.card-wrap');
-    linkState = { sourceId: wrap.getAttribute('data-id'), tempX: 0, tempY: 0 };
+    linkState = { sourceId: wrap.getAttribute('data-id'), tempX: 0, tempY: 0, mode: e.shiftKey ? 'secondary' : 'primary' };
     document.body.classList.add('no-select');
     e.preventDefault();
     return;
@@ -443,6 +509,7 @@ document.addEventListener('pointermove', e => {
   if(linkState){
     linkState.tempX = e.clientX - contentRect.left;
     linkState.tempY = e.clientY - contentRect.top;
+    linkState.mode = e.shiftKey ? 'secondary' : 'primary';
     document.querySelectorAll('.card-wrap.link-target').forEach(el => el.classList.remove('link-target'));
     const under = document.elementFromPoint(e.clientX, e.clientY);
     const targetWrap = under ? under.closest('.card-wrap') : null;
@@ -469,12 +536,21 @@ document.addEventListener('pointerup', async e => {
     if(targetWrap){
       const targetId = targetWrap.getAttribute('data-id');
       const sourceId = linkState.sourceId;
+      const target = nodeById(targetId);
       if(targetId === sourceId){
         // no-op
+      } else if(linkState.mode === 'secondary'){
+        if(target.parentId === sourceId || (target.secondaryParentIds||[]).includes(sourceId)){
+          toast('Ese vínculo ya existe.');
+        } else {
+          target.secondaryParentIds = [...(target.secondaryParentIds||[]), sourceId];
+          await saveState();
+        }
       } else if(descendantsOf(targetId).includes(sourceId)){
         toast('No se puede: crearía un ciclo en la jerarquía.');
       } else {
-        nodeById(targetId).parentId = sourceId;
+        target.parentId = sourceId;
+        target.secondaryParentIds = (target.secondaryParentIds||[]).filter(id => id !== sourceId);
         await saveState();
       }
     }
@@ -493,6 +569,24 @@ function populateParentSelect(excludeId){
     options.push(`<option value="${n.id}">${'—'.repeat(depthOf(n.id))} ${escapeHtml(n.name)}</option>`);
   });
   sel.innerHTML = options.join('');
+}
+
+function populateSecondaryList(nodeId){
+  const box = document.getElementById('secondaryList');
+  const excludeId = nodeId;
+  const banned = new Set(excludeId ? [excludeId, ...descendantsOf(excludeId)] : []);
+  const currentParentId = document.getElementById('fParent').value || null;
+  const current = nodeId ? (nodeById(nodeId).secondaryParentIds || []) : [];
+  const options = state.nodes.filter(n => !banned.has(n.id) && n.id !== currentParentId);
+  if(!options.length){
+    box.innerHTML = `<div class="sub-list-empty">No hay otros cargos disponibles todavía.</div>`;
+    return;
+  }
+  box.innerHTML = options.map(n => `
+    <label>
+      <input type="checkbox" value="${n.id}" ${current.includes(n.id) ? 'checked' : ''}>
+      ${'—'.repeat(depthOf(n.id))} ${escapeHtml(n.name)}
+    </label>`).join('');
 }
 
 function openModal(nodeId, parentPreset){
@@ -519,24 +613,27 @@ function openModal(nodeId, parentPreset){
     document.getElementById('fParent').value = parentPreset || '';
     delBtn.style.display = 'none';
   }
+  populateSecondaryList(nodeId);
   overlay.classList.add('open');
   setTimeout(()=> nameInput.focus(), 30);
 }
 function closeModal(){ document.getElementById('overlay').classList.remove('open'); editingId = null; }
+document.getElementById('fParent').addEventListener('change', () => populateSecondaryList(editingId));
 
 document.getElementById('nodeForm').addEventListener('submit', async e => {
   e.preventDefault();
   const name = document.getElementById('fName').value.trim();
   const role = document.getElementById('fRole').value.trim();
   const parentId = document.getElementById('fParent').value || null;
+  const secondaryParentIds = Array.from(document.querySelectorAll('#secondaryList input:checked')).map(i => i.value);
   if(!name) return;
 
   if(editingId){
     const node = nodeById(editingId);
-    node.name = name; node.role = role; node.parentId = parentId;
+    node.name = name; node.role = role; node.parentId = parentId; node.secondaryParentIds = secondaryParentIds;
   } else {
     const pos = newNodePosition(parentId);
-    state.nodes.push({ id: uid(), name, role, parentId, x: pos.x, y: pos.y });
+    state.nodes.push({ id: uid(), name, role, parentId, secondaryParentIds, x: pos.x, y: pos.y });
   }
   await saveState();
   closeModal();
@@ -553,6 +650,7 @@ document.getElementById('btnDelete').addEventListener('click', async () => {
   if(!confirm(msg)) return;
   kids.forEach(k => { k.parentId = node.parentId; });
   state.nodes = state.nodes.filter(n => n.id !== editingId);
+  state.nodes.forEach(n => { n.secondaryParentIds = (n.secondaryParentIds||[]).filter(id => id !== editingId); });
   await saveState();
   closeModal();
   render();
