@@ -50,11 +50,18 @@
 
   .canvas-wrap{ flex:1; overflow:auto; position:relative; background-image: radial-gradient(circle, #DFD9C8 1px, transparent 1px); background-size: 22px 22px; }
   #canvasContent{ position:relative; }
-  #linksSvg{ position:absolute; top:0; left:0; pointer-events:none; }
+  #teamLayer{ position:absolute; top:0; left:0; z-index:0; pointer-events:none; }
+  #linksSvg{ position:absolute; top:0; left:0; pointer-events:none; z-index:1; }
   .link-path{ pointer-events:stroke; cursor:pointer; }
   .link-path:hover{ stroke: var(--danger) !important; stroke-width:3; }
   .link-path.secondary{ stroke-dasharray: 6,5; }
   .link-path.secondary:hover{ stroke: var(--danger) !important; }
+
+  .team-box{ position:absolute; border:2px dashed; border-radius:18px; background:rgba(34,49,79,.025); }
+  .team-label{
+    position:absolute; top:-13px; left:16px; background:var(--paper); padding:2px 10px;
+    border-radius:6px; font-size:11px; font-weight:700; letter-spacing:.03em; white-space:nowrap;
+  }
 
   .field .sub-list{
     max-height:130px; overflow-y:auto; border:1px solid var(--line); border-radius:7px;
@@ -73,7 +80,7 @@
   .empty-state h2{ font-family:'Fraunces', serif; color: var(--ink); font-size:20px; margin-bottom:6px;}
   .empty-state p{ font-size:13.5px; line-height:1.5; margin-bottom:18px; }
 
-  .card-wrap{ position:absolute; width:190px; touch-action:none; }
+  .card-wrap{ position:absolute; width:190px; touch-action:none; z-index:2; }
   .card-wrap.dragging{ z-index:30; }
   .card-wrap.link-target .card{ outline:2px solid var(--c1); outline-offset:2px; }
   .card{
@@ -226,6 +233,12 @@
           <label><input type="radio" name="fArea" value="pedagogico"> Pedagógico</label>
         </div>
       </div>
+      <div class="field">
+        <label for="fTeam">Equipo (opcional)</label>
+        <input id="fTeam" type="text" list="teamOptions" placeholder="Ej: Equipo de Dirección">
+        <datalist id="teamOptions"></datalist>
+        <div class="field-note">Agrupa visualmente esta tarjeta con otras del mismo equipo, sin cambiar de quién depende. Escribí el mismo nombre exacto en cada una para que queden juntas.</div>
+      </div>
       <div class="field" id="bulkField">
         <label for="fBulk">¿Son varios cargos del mismo nivel? Cargalos juntos</label>
         <textarea id="fBulk" placeholder="Un nombre por línea, por ejemplo:&#10;Director de Área 1&#10;Director de Área 2&#10;Director de Área 3"></textarea>
@@ -337,6 +350,7 @@ async function loadState(){
         state.nodes.forEach(n => {
           if(!Array.isArray(n.secondaryParentIds)) n.secondaryParentIds = [];
           if(n.area === undefined) n.area = null;
+          if(n.team === undefined) n.team = null;
         });
         if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
         return;
@@ -356,7 +370,7 @@ function render(){
   const content = document.getElementById('canvasContent');
   const existingSvg = document.getElementById('linksSvg');
   if(!state.nodes.length){
-    content.innerHTML = `<svg id="linksSvg"></svg>
+    content.innerHTML = `<div id="teamLayer"></div><svg id="linksSvg"></svg>
       <div class="empty-state">
         <h2>Todavía no hay cargos</h2>
         <p>Empezá por el cargo más alto de la institución (por ejemplo, Dirección) y después agregá los que dependen de él.</p>
@@ -388,7 +402,7 @@ function render(){
         <div class="link-handle" title="Arrastrá para vincular a otro cargo"></div>
       </div>`;
   });
-  content.innerHTML = `<svg id="linksSvg"></svg>` + cardsHtml;
+  content.innerHTML = `<div id="teamLayer"></div><svg id="linksSvg"></svg>` + cardsHtml;
 
   content.querySelectorAll('[data-action="edit"]').forEach(b=>{
     b.addEventListener('click', e => { e.stopPropagation(); openModal(b.getAttribute('data-id'), null); });
@@ -413,7 +427,32 @@ function render(){
 
   updateCanvasSize();
   drawLinks();
+  renderTeamBoxes();
   renderLegend();
+}
+
+const TEAM_COLORS = ['#C0932B','#3E7C74','#B85C38','#6B4E71','#6E7F52','#3F6E9E'];
+function renderTeamBoxes(){
+  const layer = document.getElementById('teamLayer');
+  const content = document.getElementById('canvasContent');
+  const teams = [...new Set(state.nodes.map(n => (n.team||'').trim()).filter(Boolean))].sort();
+  if(!teams.length){ layer.innerHTML = ''; return; }
+  const PAD = 26;
+  let html = '';
+  teams.forEach((team, i) => {
+    const members = state.nodes.filter(n => (n.team||'').trim() === team);
+    const wraps = members.map(n => content.querySelector(`.card-wrap[data-id="${n.id}"]`)).filter(Boolean);
+    if(!wraps.length) return;
+    const minX = Math.min(...wraps.map(w => w.offsetLeft)) - PAD;
+    const minY = Math.min(...wraps.map(w => w.offsetTop)) - PAD;
+    const maxX = Math.max(...wraps.map(w => w.offsetLeft + w.offsetWidth)) + PAD;
+    const maxY = Math.max(...wraps.map(w => w.offsetTop + w.offsetHeight)) + PAD;
+    const color = TEAM_COLORS[i % TEAM_COLORS.length];
+    html += `<div class="team-box" style="left:${minX}px; top:${minY}px; width:${maxX-minX}px; height:${maxY-minY}px; border-color:${color};">
+      <div class="team-label" style="color:${color}; border:1px solid ${color};">${escapeHtml(team)}</div>
+    </div>`;
+  });
+  layer.innerHTML = html;
 }
 
 function renderLegend(){
@@ -657,6 +696,12 @@ function populateSecondaryList(nodeId){
     </label>`).join('');
 }
 
+function populateTeamOptions(){
+  const list = document.getElementById('teamOptions');
+  const teams = [...new Set(state.nodes.map(n => (n.team||'').trim()).filter(Boolean))].sort();
+  list.innerHTML = teams.map(t => `<option value="${escapeHtml(t)}"></option>`).join('');
+}
+
 function openModal(nodeId, parentPreset){
   editingId = nodeId;
   const overlay = document.getElementById('overlay');
@@ -666,6 +711,7 @@ function openModal(nodeId, parentPreset){
   const roleInput = document.getElementById('fRole');
   const bulkField = document.getElementById('bulkField');
   document.getElementById('fBulk').value = '';
+  populateTeamOptions();
 
   if(nodeId){
     const node = nodeById(nodeId);
@@ -677,6 +723,7 @@ function openModal(nodeId, parentPreset){
     delBtn.style.display = 'inline-flex';
     bulkField.style.display = 'none';
     document.querySelector(`input[name="fArea"][value="${node.area || ''}"]`).checked = true;
+    document.getElementById('fTeam').value = node.team || '';
   } else {
     title.textContent = 'Nuevo cargo';
     nameInput.value = '';
@@ -686,6 +733,7 @@ function openModal(nodeId, parentPreset){
     delBtn.style.display = 'none';
     bulkField.style.display = 'block';
     document.querySelector('input[name="fArea"][value=""]').checked = true;
+    document.getElementById('fTeam').value = '';
   }
   populateSecondaryList(nodeId);
   overlay.classList.add('open');
@@ -701,6 +749,7 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
   const parentId = document.getElementById('fParent').value || null;
   const secondaryParentIds = Array.from(document.querySelectorAll('#secondaryList input:checked')).map(i => i.value);
   const area = document.querySelector('input[name="fArea"]:checked').value || null;
+  const team = document.getElementById('fTeam').value.trim() || null;
   const bulkRaw = document.getElementById('fBulk').value;
   const bulkNames = bulkRaw.split('\n').map(s => s.trim()).filter(Boolean);
 
@@ -708,17 +757,17 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
     const node = nodeById(editingId);
     if(!name){ toast('Poné un nombre para el cargo.'); return; }
     node.name = name; node.role = role; node.parentId = parentId;
-    node.secondaryParentIds = secondaryParentIds; node.area = area;
+    node.secondaryParentIds = secondaryParentIds; node.area = area; node.team = team;
   } else if(bulkNames.length){
     bulkNames.forEach(n => {
       const pos = newNodePosition(parentId);
-      state.nodes.push({ id: uid(), name: n, role: '', parentId, secondaryParentIds: [...secondaryParentIds], area, x: pos.x, y: pos.y });
+      state.nodes.push({ id: uid(), name: n, role: '', parentId, secondaryParentIds: [...secondaryParentIds], area, team, x: pos.x, y: pos.y });
     });
     toast(`${bulkNames.length} cargos agregados, todos al mismo nivel.`);
   } else {
     if(!name){ toast('Poné un nombre, o usá el campo de varios cargos.'); return; }
     const pos = newNodePosition(parentId);
-    state.nodes.push({ id: uid(), name, role, parentId, secondaryParentIds, area, x: pos.x, y: pos.y });
+    state.nodes.push({ id: uid(), name, role, parentId, secondaryParentIds, area, team, x: pos.x, y: pos.y });
   }
   await saveState();
   closeModal();
