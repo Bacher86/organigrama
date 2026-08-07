@@ -191,7 +191,7 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional</h1>
-      <p>Arrastrá una tarjeta para moverla. Arrastrá desde el punto ⇓ hacia otra tarjeta para vincularla como dependencia principal (línea sólida). Mantené <strong>Shift</strong> mientras arrastrás para agregar una dependencia secundaria (línea punteada, para cuando alguien reporta a dos personas). Clic en una línea para quitarla.</p>
+      <p>Arrastrá una tarjeta para moverla. Arrastrá desde el punto ⇓ hacia otra tarjeta para vincularla como dependencia principal (línea sólida). Mantené <strong>Shift</strong> mientras arrastrás para agregar una dependencia secundaria (línea punteada, para cuando alguien reporta a dos personas). Si todo un equipo depende del mismo superior, se dibuja una sola línea al recuadro del equipo. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <button class="btn btn-ghost" id="btnArrange">Reacomodar</button>
@@ -440,8 +440,8 @@ function render(){
   });
 
   updateCanvasSize();
-  drawLinks();
   renderTeamBoxes();
+  drawLinks();
   renderLegend();
 }
 
@@ -566,8 +566,41 @@ function drawLinks(){
     return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
   }
 
+  function pathToBox(fromId, team){
+    const parentWrap = content.querySelector(`.card-wrap[data-id="${fromId}"]`);
+    const parentEl = content.querySelector(`.card-wrap[data-id="${fromId}"] .card`);
+    const box = content.querySelector(`.team-box[data-team="${CSS.escape(team)}"]`);
+    if(!parentWrap || !box) return null;
+    const x1 = parentWrap.offsetLeft + parentWrap.offsetWidth/2;
+    const y1 = parentWrap.offsetTop + parentEl.offsetHeight;
+    const x2 = box.offsetLeft + box.offsetWidth/2;
+    const y2 = box.offsetTop;
+    const midY = (y1+y2)/2;
+    return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+  }
+
+  // teams where every member shares the exact same primary parent get ONE
+  // consolidated line from that parent to the team box, instead of one per member
+  const teamNames = [...new Set(state.nodes.map(n => (n.team||'').trim()).filter(Boolean))];
+  const consolidatedParentByTeam = {};
+  const collapsedChildIds = new Set();
+  teamNames.forEach(team => {
+    const members = state.nodes.filter(n => (n.team||'').trim() === team);
+    if(members.length < 2) return;
+    const firstParent = members[0].parentId;
+    if(firstParent && members.every(m => m.parentId === firstParent)){
+      consolidatedParentByTeam[team] = firstParent;
+      members.forEach(m => collapsedChildIds.add(m.id));
+    }
+  });
+
+  Object.entries(consolidatedParentByTeam).forEach(([team, parentId]) => {
+    const d = pathToBox(parentId, team);
+    if(d) paths += `<path d="${d}" class="link-path team-link" data-team="${escapeHtml(team)}" stroke="#C9C2AE" stroke-width="2.5" fill="none"/>`;
+  });
+
   state.nodes.forEach(n=>{
-    if(n.parentId){
+    if(n.parentId && !collapsedChildIds.has(n.id)){
       const d = pathBetween(n.parentId, n.id);
       if(d) paths += `<path d="${d}" class="link-path" data-child="${n.id}" stroke="#C9C2AE" stroke-width="2" fill="none"/>`;
     }
@@ -594,6 +627,15 @@ function drawLinks(){
   svg.querySelectorAll('.link-path').forEach(p=>{
     p.addEventListener('click', async (e)=>{
       e.stopPropagation();
+      const team = p.getAttribute('data-team');
+      if(team){
+        if(confirm(`¿Quitar el vínculo del equipo "${team}" con su superior? Los miembros pasarán a ser de nivel superior (raíz).`)){
+          state.nodes.forEach(n => { if((n.team||'').trim() === team) n.parentId = null; });
+          await saveState();
+          render();
+        }
+        return;
+      }
       const childId = p.getAttribute('data-child');
       const node = nodeById(childId);
       const secParent = p.getAttribute('data-secparent');
