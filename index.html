@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Organigrama Institucional</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  :root{
+    --bg: #F6F3EC;
+    --paper: #FFFFFF;
+    --ink: #22314F;
+    --ink-soft: #5B6785;
+    --line: #C9C2AE;
+    --danger: #B23A3A;
+    --ring: #22314F;
+    --c0: #22314F; --c1: #3E7C74; --c2: #C0932B;
+    --c3: #B85C38; --c4: #6B4E71; --c5: #6E7F52;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; height:100%; background: var(--bg); color: var(--ink); font-family:'IBM Plex Sans', sans-serif; overflow:hidden; }
+  .app{ display:flex; flex-direction:column; height:100vh; }
+  body.no-select{ user-select:none; }
+
+  header{
+    padding: 18px 28px 14px 28px; border-bottom: 1px solid var(--line);
+    display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;
+    background: linear-gradient(180deg, #FBF9F4 0%, var(--bg) 100%); flex:none;
+  }
+  .title-block h1{ font-family:'Fraunces', serif; font-weight:700; font-size:26px; margin:0 0 3px 0; letter-spacing:-0.01em; }
+  .title-block p{ margin:0; color: var(--ink-soft); font-size:13px; max-width:520px; line-height:1.4; }
+  .header-actions{ display:flex; gap:10px; align-items:center; }
+  button{ font-family:'IBM Plex Sans', sans-serif; cursor:pointer; }
+  .btn{ border:none; border-radius:8px; padding:10px 16px; font-size:13.5px; font-weight:600; letter-spacing:.01em; display:inline-flex; align-items:center; gap:8px; transition: transform .12s ease, box-shadow .12s ease; }
+  .btn:active{ transform: scale(.97); }
+  .btn-primary{ background: var(--ink); color:#fff; }
+  .btn-primary:hover{ box-shadow: 0 4px 14px rgba(34,49,79,.28); }
+  .btn-ghost{ background: transparent; color: var(--ink); border:1px solid var(--line); }
+  .btn-ghost:hover{ background: #EFEAE0; }
+  .btn-danger{ background: var(--danger); color:#fff; }
+
+  .legend{ display:flex; gap:18px; flex-wrap:wrap; padding:10px 28px; border-bottom: 1px solid var(--line); font-size:13px; color: var(--ink-soft); background: var(--paper); flex:none; }
+  .legend-item{ display:flex; align-items:center; gap:7px; }
+  .legend-dot{ width:10px; height:10px; border-radius:2px; flex:none; }
+  .legend-item [contenteditable]{ outline:none; border-bottom:1px dashed transparent; color: var(--ink); font-weight:500; }
+  .legend-item [contenteditable]:hover{ border-bottom-color: var(--line); }
+  .legend-item [contenteditable]:focus{ border-bottom-color: var(--ink); }
+  .legend-empty{ color: var(--ink-soft); font-style: italic; }
+
+  .canvas-wrap{ flex:1; overflow:auto; position:relative; background-image: radial-gradient(circle, #DFD9C8 1px, transparent 1px); background-size: 22px 22px; }
+  #canvasContent{ position:relative; }
+  #linksSvg{ position:absolute; top:0; left:0; pointer-events:none; }
+  .link-path{ pointer-events:stroke; cursor:pointer; }
+  .link-path:hover{ stroke: var(--danger) !important; stroke-width:3; }
+
+  .empty-state{ max-width:380px; margin:80px auto; text-align:center; color: var(--ink-soft); position:relative; }
+  .empty-state h2{ font-family:'Fraunces', serif; color: var(--ink); font-size:20px; margin-bottom:6px;}
+  .empty-state p{ font-size:13.5px; line-height:1.5; margin-bottom:18px; }
+
+  .card-wrap{ position:absolute; width:190px; touch-action:none; }
+  .card-wrap.dragging{ z-index:30; }
+  .card-wrap.link-target .card{ outline:2px solid var(--c1); outline-offset:2px; }
+  .card{
+    display:block; background: var(--paper); border:1px solid var(--line);
+    border-left:5px solid var(--c0); border-radius:3px 8px 8px 3px;
+    padding:11px 14px 12px 12px; text-align:left; box-shadow:0 1px 2px rgba(34,49,79,.08);
+    position:relative; cursor:grab; transition: box-shadow .15s ease;
+  }
+  .card-wrap.dragging .card{ cursor:grabbing; box-shadow: 0 10px 26px rgba(34,49,79,.3); }
+  .card:hover{ box-shadow: 0 6px 18px rgba(34,49,79,.16); }
+  .card .name{ font-family:'Fraunces', serif; font-weight:600; font-size:15px; line-height:1.25; margin-bottom:2px; word-break:break-word; }
+  .card .role{ font-size:11.5px; color: var(--ink-soft); font-weight:500; text-transform:uppercase; letter-spacing:.04em; word-break:break-word; }
+  .card-actions{ position:absolute; top:6px; right:6px; display:flex; gap:4px; opacity:0; transition: opacity .12s ease; }
+  .card:hover .card-actions{ opacity:1; }
+  .icon-btn{ width:22px; height:22px; border-radius:5px; border:none; background:#F1EDE3; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; font-size:12px; line-height:1; }
+  .icon-btn:hover{ background:#E4DECE; color:var(--ink); }
+
+  .link-handle{
+    position:absolute; left:50%; bottom:-8px; transform:translateX(-50%);
+    width:16px; height:16px; border-radius:50%; background:var(--ink-soft); border:2px solid var(--paper);
+    cursor:crosshair; opacity:0; transition: opacity .12s ease, transform .12s ease; z-index:5;
+  }
+  .card-wrap:hover .link-handle{ opacity:1; }
+  .link-handle:hover{ transform:translateX(-50%) scale(1.25); background:var(--ink); }
+  .link-handle::after{ content:'⇓'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9px; color:#fff; }
+
+  .overlay{ position:fixed; inset:0; background: rgba(34,49,79,.35); display:none; align-items:center; justify-content:center; z-index:50; backdrop-filter: blur(1px); }
+  .overlay.open{ display:flex; }
+  .modal{ background:var(--paper); width:360px; max-width:90vw; border-radius:10px; padding:22px 22px 18px 22px; box-shadow: 0 20px 60px rgba(34,49,79,.25); }
+  .modal h3{ font-family:'Fraunces', serif; margin:0 0 16px 0; font-size:18px; }
+  .field{ margin-bottom:13px; }
+  .field label{ display:block; font-size:11.5px; font-weight:600; color: var(--ink-soft); text-transform:uppercase; letter-spacing:.04em; margin-bottom:5px; }
+  .field input, .field select{ width:100%; padding:9px 10px; border-radius:7px; border:1px solid var(--line); font-family:'IBM Plex Sans', sans-serif; font-size:14px; background:#FBFAF7; color:var(--ink); }
+  .field input:focus, .field select:focus{ outline:2px solid var(--ring); outline-offset:1px; }
+  .modal-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:18px; gap:8px; }
+  .modal-actions .right{ display:flex; gap:8px; }
+
+  .dropdown{ position:relative; }
+  .dropdown-menu{
+    position:absolute; top:calc(100% + 6px); right:0; background:var(--paper);
+    border:1px solid var(--line); border-radius:9px; box-shadow: 0 12px 30px rgba(34,49,79,.18);
+    min-width:210px; padding:6px; display:none; z-index:40;
+  }
+  .dropdown-menu.open{ display:block; }
+  .dropdown-menu button{
+    width:100%; text-align:left; background:none; border:none; padding:9px 10px;
+    border-radius:6px; font-size:13.5px; color:var(--ink); display:flex; align-items:center; gap:9px;
+  }
+  .dropdown-menu button:hover{ background:#F1EDE3; }
+  .dropdown-menu .menu-hint{ font-size:11px; color:var(--ink-soft); padding:2px 10px 6px 10px; }
+
+  .toast{
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
+    background: var(--ink); color:#fff; padding:10px 18px; border-radius:8px; font-size:13px;
+    opacity:0; pointer-events:none; transition: all .25s ease; z-index:60;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="title-block">
+      <h1>Organigrama Institucional</h1>
+      <p>Arrastrá una tarjeta para moverla. Arrastrá desde el punto ⇓ de abajo hacia otra tarjeta para crear el vínculo de dependencia. Clic en una línea para quitarla.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" id="btnArrange">Reacomodar</button>
+      <button class="btn btn-ghost" id="btnImport">Importar</button>
+      <input type="file" id="fileImport" accept="application/json" style="display:none;">
+      <div class="dropdown">
+        <button class="btn btn-ghost" id="btnDownload">Descargar ▾</button>
+        <div class="dropdown-menu" id="downloadMenu">
+          <button type="button" id="btnExportPng">🖼️ Imagen (PNG)</button>
+          <button type="button" id="btnExportJson">💾 Copia de respaldo (JSON)</button>
+          <div class="menu-hint">La copia JSON sirve para llevar el organigrama a otra compu o restaurarlo con "Importar".</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost" id="btnReset">Reiniciar</button>
+      <button class="btn btn-primary" id="btnAddRoot">+ Agregar cargo</button>
+    </div>
+  </header>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <div id="canvasContent">
+      <svg id="linksSvg"></svg>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="modalTitle">Nuevo cargo</h3>
+    <form id="nodeForm">
+      <div class="field">
+        <label for="fName">Nombre del cargo</label>
+        <input id="fName" type="text" placeholder="Ej: Vicedirección" required>
+      </div>
+      <div class="field">
+        <label for="fRole">Persona / detalle (opcional)</label>
+        <input id="fRole" type="text" placeholder="Ej: Prof. María Gómez">
+      </div>
+      <div class="field">
+        <label for="fParent">Depende de</label>
+        <select id="fParent"></select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-danger" id="btnDelete" style="display:none;">Eliminar</button>
+        <div class="right">
+          <button type="button" class="btn btn-ghost" id="btnCancel">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const STORAGE_KEY = 'orgchart:state:v2';
+const COLORS = ['c0','c1','c2','c3','c4','c5'];
+const CARD_W = 190, CARD_GAP_X = 30, LEVEL_H = 150, START_X = 50, START_Y = 40;
+
+let state = { nodes: [], levelNames: {} };
+let editingId = null;
+let dragState = null;
+let linkState = null;
+
+function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._h);
+  toast._h = setTimeout(()=> t.classList.remove('show'), 2200);
+}
+
+function childrenOf(id){ return state.nodes.filter(n => n.parentId === id); }
+function roots(){ return state.nodes.filter(n => n.parentId === null); }
+function nodeById(id){ return state.nodes.find(n => n.id === id); }
+function depthOf(id){
+  let d = 0, cur = nodeById(id);
+  while(cur && cur.parentId){ d++; cur = nodeById(cur.parentId); if(d>50) break; }
+  return d;
+}
+function descendantsOf(id){
+  const out = []; const stack = [...childrenOf(id)];
+  while(stack.length){ const n = stack.pop(); out.push(n.id); stack.push(...childrenOf(n.id)); }
+  return out;
+}
+function colorVar(depth){ return `var(--${COLORS[depth % COLORS.length]})`; }
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function autoLayout(){
+  let cursor = START_X;
+  function place(node){
+    const kids = childrenOf(node.id);
+    if(!kids.length){
+      node.x = cursor; cursor += CARD_W + CARD_GAP_X;
+    } else {
+      kids.forEach(place);
+      node.x = (kids[0].x + kids[kids.length-1].x) / 2;
+    }
+    node.y = START_Y + depthOf(node.id) * LEVEL_H;
+  }
+  roots().forEach(place);
+}
+
+function newNodePosition(parentId){
+  if(!parentId){
+    const rts = roots();
+    const maxX = rts.length ? Math.max(...rts.map(r => r.x || 0)) : (START_X - CARD_W - 60);
+    return { x: maxX + CARD_W + 60, y: START_Y };
+  }
+  const parent = nodeById(parentId);
+  const sibs = childrenOf(parentId);
+  const baseX = (parent.x || START_X) - 90 + sibs.length * (CARD_W + 30);
+  return { x: Math.max(20, baseX), y: (parent.y || START_Y) + LEVEL_H };
+}
+
+function seed(){
+  const dir = { id: uid(), name: 'Dirección', role: '', parentId: null };
+  const vice = { id: uid(), name: 'Vicedirección', role: '', parentId: dir.id };
+  const sec = { id: uid(), name: 'Secretaría', role: '', parentId: dir.id };
+  const coordPed = { id: uid(), name: 'Coordinación Pedagógica', role: '', parentId: vice.id };
+  const coordAdm = { id: uid(), name: 'Coordinación Administrativa', role: '', parentId: vice.id };
+  const docentes = { id: uid(), name: 'Cuerpo Docente', role: '', parentId: coordPed.id };
+  state.nodes = [dir, vice, sec, coordPed, coordAdm, docentes];
+  state.levelNames = { 0: 'Dirección General', 1: 'Gestión', 2: 'Coordinación', 3: 'Equipo' };
+  autoLayout();
+}
+
+async function loadState(){
+  try{
+    const res = await window.storage.get(STORAGE_KEY, false);
+    if(res && res.value){
+      const parsed = JSON.parse(res.value);
+      if(parsed && Array.isArray(parsed.nodes)){
+        state = parsed;
+        if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
+        return;
+      }
+    }
+  }catch(e){ /* nothing saved yet */ }
+  seed();
+  await saveState();
+}
+async function saveState(){
+  try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
+  catch(e){ console.error('No se pudo guardar', e); }
+}
+
+/* ---------- render ---------- */
+function render(){
+  const content = document.getElementById('canvasContent');
+  const existingSvg = document.getElementById('linksSvg');
+  if(!state.nodes.length){
+    content.innerHTML = `<svg id="linksSvg"></svg>
+      <div class="empty-state">
+        <h2>Todavía no hay cargos</h2>
+        <p>Empezá por el cargo más alto de la institución (por ejemplo, Dirección) y después agregá los que dependen de él.</p>
+        <button class="btn btn-primary" id="emptyAdd">+ Agregar el primer cargo</button>
+      </div>`;
+    document.getElementById('emptyAdd').addEventListener('click', () => openModal(null, null));
+    renderLegend();
+    return;
+  }
+
+  let cardsHtml = '';
+  state.nodes.forEach(node => {
+    const depth = depthOf(node.id);
+    cardsHtml += `
+      <div class="card-wrap" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
+        <div class="card" style="border-left-color:${colorVar(depth)}">
+          <div class="card-actions">
+            <button class="icon-btn" data-action="add" data-id="${node.id}" title="Agregar subordinado">+</button>
+            <button class="icon-btn" data-action="edit" data-id="${node.id}" title="Editar">✎</button>
+          </div>
+          <div class="name">${escapeHtml(node.name)}</div>
+          ${node.role ? `<div class="role">${escapeHtml(node.role)}</div>` : ''}
+        </div>
+        <div class="link-handle" title="Arrastrá para vincular a otro cargo"></div>
+      </div>`;
+  });
+  content.innerHTML = `<svg id="linksSvg"></svg>` + cardsHtml;
+
+  content.querySelectorAll('[data-action="edit"]').forEach(b=>{
+    b.addEventListener('click', e => { e.stopPropagation(); openModal(b.getAttribute('data-id'), null); });
+  });
+  content.querySelectorAll('[data-action="add"]').forEach(b=>{
+    b.addEventListener('click', e => { e.stopPropagation(); openModal(null, b.getAttribute('data-id')); });
+  });
+
+  updateCanvasSize();
+  drawLinks();
+  renderLegend();
+}
+
+function renderLegend(){
+  const depths = [...new Set(state.nodes.map(n => depthOf(n.id)))].sort((a,b)=>a-b);
+  const legend = document.getElementById('legend');
+  if(!depths.length){
+    legend.innerHTML = `<span class="legend-empty">Los niveles aparecen automáticamente a medida que agregás cargos.</span>`;
+    return;
+  }
+  legend.innerHTML = depths.map(d => {
+    const label = state.levelNames[d] || `Nivel ${d+1}`;
+    return `<div class="legend-item">
+      <span class="legend-dot" style="background:${colorVar(d)}"></span>
+      <span contenteditable="true" data-depth="${d}" class="level-label">${escapeHtml(label)}</span>
+    </div>`;
+  }).join('');
+  legend.querySelectorAll('.level-label').forEach(el => {
+    el.addEventListener('blur', async () => {
+      const d = el.getAttribute('data-depth');
+      state.levelNames[d] = el.textContent.trim() || `Nivel ${parseInt(d)+1}`;
+      await saveState();
+    });
+    el.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); el.blur(); } });
+  });
+}
+
+function updateCanvasSize(){
+  let maxX = 900, maxY = 500;
+  state.nodes.forEach(n=>{
+    maxX = Math.max(maxX, (n.x||0) + CARD_W + 100);
+    maxY = Math.max(maxY, (n.y||0) + 170);
+  });
+  const content = document.getElementById('canvasContent');
+  content.style.width = maxX + 'px';
+  content.style.height = maxY + 'px';
+}
+
+function drawLinks(){
+  const svg = document.getElementById('linksSvg');
+  const content = document.getElementById('canvasContent');
+  let paths = '';
+  state.nodes.forEach(n=>{
+    if(!n.parentId) return;
+    const parentEl = content.querySelector(`.card-wrap[data-id="${n.parentId}"] .card`);
+    const childEl = content.querySelector(`.card-wrap[data-id="${n.id}"] .card`);
+    const parentWrap = content.querySelector(`.card-wrap[data-id="${n.parentId}"]`);
+    const childWrap = content.querySelector(`.card-wrap[data-id="${n.id}"]`);
+    if(!parentEl || !childEl) return;
+    const x1 = parentWrap.offsetLeft + parentWrap.offsetWidth/2;
+    const y1 = parentWrap.offsetTop + parentEl.offsetHeight;
+    const x2 = childWrap.offsetLeft + childWrap.offsetWidth/2;
+    const y2 = childWrap.offsetTop;
+    const midY = (y1+y2)/2;
+    paths += `<path d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" class="link-path" data-child="${n.id}" stroke="#C9C2AE" stroke-width="2" fill="none"/>`;
+  });
+  if(linkState && linkState.tempX !== undefined){
+    const srcWrap = content.querySelector(`.card-wrap[data-id="${linkState.sourceId}"]`);
+    const srcCard = content.querySelector(`.card-wrap[data-id="${linkState.sourceId}"] .card`);
+    if(srcWrap){
+      const x1 = srcWrap.offsetLeft + srcWrap.offsetWidth/2;
+      const y1 = srcWrap.offsetTop + srcCard.offsetHeight;
+      paths += `<path d="M ${x1} ${y1} L ${linkState.tempX} ${linkState.tempY}" stroke="#22314F" stroke-width="2" stroke-dasharray="5,4" fill="none"/>`;
+    }
+  }
+  svg.innerHTML = paths;
+  svg.setAttribute('width', content.style.width || content.scrollWidth);
+  svg.setAttribute('height', content.style.height || content.scrollHeight);
+
+  svg.querySelectorAll('.link-path').forEach(p=>{
+    p.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      const childId = p.getAttribute('data-child');
+      const node = nodeById(childId);
+      if(confirm(`¿Quitar el vínculo de "${node.name}"? Pasará a ser de nivel superior (raíz).`)){
+        node.parentId = null;
+        await saveState();
+        render();
+      }
+    });
+  });
+}
+
+/* ---------- drag & link (pointer events) ---------- */
+document.getElementById('canvasContent').addEventListener('pointerdown', e => {
+  const handle = e.target.closest('.link-handle');
+  if(handle){
+    const wrap = handle.closest('.card-wrap');
+    linkState = { sourceId: wrap.getAttribute('data-id'), tempX: 0, tempY: 0 };
+    document.body.classList.add('no-select');
+    e.preventDefault();
+    return;
+  }
+  const wrap = e.target.closest('.card-wrap');
+  if(!wrap || e.target.closest('.icon-btn')) return;
+  const id = wrap.getAttribute('data-id');
+  const node = nodeById(id);
+  const contentRect = document.getElementById('canvasContent').getBoundingClientRect();
+  dragState = {
+    id,
+    offsetX: e.clientX - contentRect.left - node.x,
+    offsetY: e.clientY - contentRect.top - node.y
+  };
+  wrap.classList.add('dragging');
+  document.body.classList.add('no-select');
+  e.preventDefault();
+});
+
+document.addEventListener('pointermove', e => {
+  const contentEl = document.getElementById('canvasContent');
+  if(!contentEl) return;
+  const contentRect = contentEl.getBoundingClientRect();
+
+  if(dragState){
+    const node = nodeById(dragState.id);
+    node.x = Math.max(0, e.clientX - contentRect.left - dragState.offsetX);
+    node.y = Math.max(0, e.clientY - contentRect.top - dragState.offsetY);
+    const wrap = contentEl.querySelector(`.card-wrap[data-id="${dragState.id}"]`);
+    if(wrap){ wrap.style.left = node.x + 'px'; wrap.style.top = node.y + 'px'; }
+    updateCanvasSize();
+    drawLinks();
+    return;
+  }
+
+  if(linkState){
+    linkState.tempX = e.clientX - contentRect.left;
+    linkState.tempY = e.clientY - contentRect.top;
+    document.querySelectorAll('.card-wrap.link-target').forEach(el => el.classList.remove('link-target'));
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const targetWrap = under ? under.closest('.card-wrap') : null;
+    if(targetWrap && targetWrap.getAttribute('data-id') !== linkState.sourceId){
+      targetWrap.classList.add('link-target');
+    }
+    drawLinks();
+  }
+});
+
+document.addEventListener('pointerup', async e => {
+  document.body.classList.remove('no-select');
+
+  if(dragState){
+    dragState = null;
+    document.querySelectorAll('.card-wrap.dragging').forEach(el => el.classList.remove('dragging'));
+    await saveState();
+  }
+
+  if(linkState){
+    document.querySelectorAll('.card-wrap.link-target').forEach(el => el.classList.remove('link-target'));
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const targetWrap = under ? under.closest('.card-wrap') : null;
+    if(targetWrap){
+      const targetId = targetWrap.getAttribute('data-id');
+      const sourceId = linkState.sourceId;
+      if(targetId === sourceId){
+        // no-op
+      } else if(descendantsOf(targetId).includes(sourceId)){
+        toast('No se puede: crearía un ciclo en la jerarquía.');
+      } else {
+        nodeById(targetId).parentId = sourceId;
+        await saveState();
+      }
+    }
+    linkState = null;
+    render();
+  }
+});
+
+/* ---------- modal ---------- */
+function populateParentSelect(excludeId){
+  const sel = document.getElementById('fParent');
+  const banned = new Set(excludeId ? [excludeId, ...descendantsOf(excludeId)] : []);
+  const options = ['<option value="">— Nivel superior (raíz) —</option>'];
+  state.nodes.forEach(n => {
+    if(banned.has(n.id)) return;
+    options.push(`<option value="${n.id}">${'—'.repeat(depthOf(n.id))} ${escapeHtml(n.name)}</option>`);
+  });
+  sel.innerHTML = options.join('');
+}
+
+function openModal(nodeId, parentPreset){
+  editingId = nodeId;
+  const overlay = document.getElementById('overlay');
+  const title = document.getElementById('modalTitle');
+  const delBtn = document.getElementById('btnDelete');
+  const nameInput = document.getElementById('fName');
+  const roleInput = document.getElementById('fRole');
+
+  if(nodeId){
+    const node = nodeById(nodeId);
+    title.textContent = 'Editar cargo';
+    nameInput.value = node.name;
+    roleInput.value = node.role || '';
+    populateParentSelect(nodeId);
+    document.getElementById('fParent').value = node.parentId || '';
+    delBtn.style.display = 'inline-flex';
+  } else {
+    title.textContent = 'Nuevo cargo';
+    nameInput.value = '';
+    roleInput.value = '';
+    populateParentSelect(null);
+    document.getElementById('fParent').value = parentPreset || '';
+    delBtn.style.display = 'none';
+  }
+  overlay.classList.add('open');
+  setTimeout(()=> nameInput.focus(), 30);
+}
+function closeModal(){ document.getElementById('overlay').classList.remove('open'); editingId = null; }
+
+document.getElementById('nodeForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = document.getElementById('fName').value.trim();
+  const role = document.getElementById('fRole').value.trim();
+  const parentId = document.getElementById('fParent').value || null;
+  if(!name) return;
+
+  if(editingId){
+    const node = nodeById(editingId);
+    node.name = name; node.role = role; node.parentId = parentId;
+  } else {
+    const pos = newNodePosition(parentId);
+    state.nodes.push({ id: uid(), name, role, parentId, x: pos.x, y: pos.y });
+  }
+  await saveState();
+  closeModal();
+  render();
+});
+
+document.getElementById('btnDelete').addEventListener('click', async () => {
+  if(!editingId) return;
+  const node = nodeById(editingId);
+  const kids = childrenOf(editingId);
+  const msg = kids.length
+    ? `¿Eliminar "${node.name}"? Sus ${kids.length} cargo(s) directamente subordinados pasarán a depender de quien estaba por encima.`
+    : `¿Eliminar "${node.name}"?`;
+  if(!confirm(msg)) return;
+  kids.forEach(k => { k.parentId = node.parentId; });
+  state.nodes = state.nodes.filter(n => n.id !== editingId);
+  await saveState();
+  closeModal();
+  render();
+});
+
+document.getElementById('btnCancel').addEventListener('click', closeModal);
+document.getElementById('overlay').addEventListener('click', e => { if(e.target.id === 'overlay') closeModal(); });
+document.getElementById('btnAddRoot').addEventListener('click', () => openModal(null, null));
+document.getElementById('btnArrange').addEventListener('click', async () => {
+  autoLayout();
+  await saveState();
+  render();
+  toast('Organigrama reacomodado.');
+});
+document.getElementById('btnReset').addEventListener('click', async () => {
+  if(!confirm('Esto borra todo el organigrama actual. ¿Continuar?')) return;
+  state = { nodes: [], levelNames: {} };
+  await saveState();
+  render();
+});
+
+/* ---------- download menu ---------- */
+const downloadMenu = document.getElementById('downloadMenu');
+document.getElementById('btnDownload').addEventListener('click', e => {
+  e.stopPropagation();
+  downloadMenu.classList.toggle('open');
+});
+document.addEventListener('click', () => downloadMenu.classList.remove('open'));
+
+document.getElementById('btnExportJson').addEventListener('click', () => {
+  downloadMenu.classList.remove('open');
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'organigrama-institucional.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast('Copia de respaldo descargada.');
+});
+
+document.getElementById('btnExportPng').addEventListener('click', async () => {
+  downloadMenu.classList.remove('open');
+  if(!state.nodes.length){ toast('No hay nada para descargar todavía.'); return; }
+  toast('Generando imagen…');
+  try{
+    const legendCanvas = await html2canvas(document.getElementById('legend'), { backgroundColor: '#FFFFFF', scale: 2 });
+    const chartCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale: 2 });
+    const titleHeight = 100;
+    const width = Math.max(legendCanvas.width, chartCanvas.width, 900);
+    const combined = document.createElement('canvas');
+    combined.width = width;
+    combined.height = titleHeight + legendCanvas.height + chartCanvas.height;
+    const ctx = combined.getContext('2d');
+    ctx.fillStyle = '#F6F3EC';
+    ctx.fillRect(0, 0, combined.width, combined.height);
+    ctx.fillStyle = '#22314F';
+    ctx.font = '600 40px Georgia, serif';
+    ctx.fillText('Organigrama Institucional', 28, 58);
+    ctx.drawImage(legendCanvas, 0, titleHeight);
+    ctx.drawImage(chartCanvas, 0, titleHeight + legendCanvas.height);
+
+    const link = document.createElement('a');
+    link.download = 'organigrama-institucional.png';
+    link.href = combined.toDataURL('image/png');
+    document.body.appendChild(link); link.click(); link.remove();
+    toast('Imagen descargada.');
+  }catch(err){
+    console.error(err);
+    toast('No se pudo generar la imagen. Probá de nuevo.');
+  }
+});
+
+/* ---------- import ---------- */
+document.getElementById('btnImport').addEventListener('click', () => document.getElementById('fileImport').click());
+document.getElementById('fileImport').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async evt => {
+    try{
+      const parsed = JSON.parse(evt.target.result);
+      if(!parsed || !Array.isArray(parsed.nodes)) throw new Error('formato inválido');
+      if(!confirm('Esto reemplaza el organigrama actual por el del archivo importado. ¿Continuar?')) return;
+      state = { nodes: parsed.nodes, levelNames: parsed.levelNames || {} };
+      if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
+      await saveState();
+      render();
+      toast('Organigrama importado.');
+    }catch(err){
+      toast('El archivo no es una copia de respaldo válida.');
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+});
+
+(async function init(){
+  await loadState();
+  render();
+})();
+</script>
+</body>
+</html>
