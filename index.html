@@ -210,7 +210,7 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional</h1>
-      <p>Arrastrá una tarjeta para moverla. Arrastrá desde el punto ⇓ hacia otra tarjeta para vincularla como dependencia principal (línea sólida). Mantené <strong>Shift</strong> mientras arrastrás para agregar una dependencia secundaria (línea punteada, para cuando alguien reporta a dos personas). Si todo un equipo depende del mismo superior, se dibuja una sola línea al recuadro del equipo. Clic en una línea para quitarla.</p>
+      <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como dependencia principal; con <strong>Shift</strong>, como secundaria. Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <button class="btn btn-ghost" id="btnArrange">Reacomodar</button>
@@ -256,6 +256,11 @@
       <div class="field">
         <label for="fRole">Persona / detalle (opcional)</label>
         <input id="fRole" type="text" placeholder="Ej: Prof. María Gómez">
+      </div>
+      <div class="field">
+        <label for="fRank">Nivel jerárquico (opcional)</label>
+        <input id="fRank" type="number" min="1" step="1" placeholder="Ej: 1 = el más alto de todos">
+        <div class="field-note">Si lo completás, manda por encima de la jerarquía automática: cuanto más cerca de 1, más arriba queda. Dejalo vacío para que se calcule solo según de quién depende.</div>
       </div>
       <div class="field">
         <label>Área</label>
@@ -336,6 +341,13 @@ function descendantsOf(id){
   return out;
 }
 function colorVar(depth){ return `var(--${COLORS[depth % COLORS.length]})`; }
+// A manual "rank" (1 = highest) overrides the automatically-computed tree
+// depth for vertical position and level color, when the person set one.
+function effectiveLevel(id){
+  const n = nodeById(id);
+  if(n && typeof n.rank === 'number' && !isNaN(n.rank)) return Math.max(0, n.rank - 1);
+  return depthOf(id);
+}
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 function autoLayout(){
@@ -348,7 +360,7 @@ function autoLayout(){
       kids.forEach(place);
       node.x = (kids[0].x + kids[kids.length-1].x) / 2;
     }
-    node.y = START_Y + depthOf(node.id) * LEVEL_H;
+    node.y = START_Y + effectiveLevel(node.id) * LEVEL_H;
   }
   roots().forEach(place);
 }
@@ -366,12 +378,12 @@ function newNodePosition(parentId){
 }
 
 function seed(){
-  const dir = { id: uid(), name: 'Dirección', role: '', parentId: null, secondaryParentIds: [], area: null, teams: [] };
-  const vice = { id: uid(), name: 'Vicedirección', role: '', parentId: dir.id, secondaryParentIds: [], area: 'gestion', teams: [] };
-  const sec = { id: uid(), name: 'Secretaría', role: '', parentId: dir.id, secondaryParentIds: [], area: 'gestion', teams: [] };
-  const coordPed = { id: uid(), name: 'Coordinación Pedagógica', role: '', parentId: vice.id, secondaryParentIds: [], area: 'pedagogico', teams: [] };
-  const coordAdm = { id: uid(), name: 'Coordinación Administrativa', role: '', parentId: vice.id, secondaryParentIds: [], area: 'gestion', teams: [] };
-  const docentes = { id: uid(), name: 'Cuerpo Docente', role: '', parentId: coordPed.id, secondaryParentIds: [], area: 'pedagogico', teams: [] };
+  const dir = { id: uid(), name: 'Dirección', role: '', parentId: null, secondaryParentIds: [], area: null, teams: [], rank: null };
+  const vice = { id: uid(), name: 'Vicedirección', role: '', parentId: dir.id, secondaryParentIds: [], area: 'gestion', teams: [], rank: null };
+  const sec = { id: uid(), name: 'Secretaría', role: '', parentId: dir.id, secondaryParentIds: [], area: 'gestion', teams: [], rank: null };
+  const coordPed = { id: uid(), name: 'Coordinación Pedagógica', role: '', parentId: vice.id, secondaryParentIds: [], area: 'pedagogico', teams: [], rank: null };
+  const coordAdm = { id: uid(), name: 'Coordinación Administrativa', role: '', parentId: vice.id, secondaryParentIds: [], area: 'gestion', teams: [], rank: null };
+  const docentes = { id: uid(), name: 'Cuerpo Docente', role: '', parentId: coordPed.id, secondaryParentIds: [], area: 'pedagogico', teams: [], rank: null };
   state.nodes = [dir, vice, sec, coordPed, coordAdm, docentes];
   state.levelNames = { 0: 'Dirección General', 1: 'Gestión', 2: 'Coordinación', 3: 'Equipo' };
   autoLayout();
@@ -390,6 +402,7 @@ async function loadState(){
           if(!Array.isArray(n.teams)){
             n.teams = (typeof n.team === 'string' && n.team.trim()) ? [n.team.trim()] : [];
           }
+          if(n.rank === undefined) n.rank = null;
           delete n.team;
         });
         if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
@@ -424,7 +437,7 @@ function render(){
   const allTeams = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(t => t.trim()).filter(Boolean))].sort();
   let cardsHtml = '';
   state.nodes.forEach(node => {
-    const depth = depthOf(node.id);
+    const depth = effectiveLevel(node.id);
     const dimmed = currentFilter !== 'all' && node.area !== currentFilter;
     const badge = node.area === 'gestion' ? `<div class="badge badge-gestion">Gestión</div>`
       : node.area === 'pedagogico' ? `<div class="badge badge-pedagogico">Pedagógico</div>` : '';
@@ -498,7 +511,7 @@ function affiliateMembersOf(team){
 }
 function teamLeader(members){
   if(!members.length) return null;
-  return members.slice().sort((a,b) => depthOf(a.id) - depthOf(b.id))[0];
+  return members.slice().sort((a,b) => effectiveLevel(a.id) - effectiveLevel(b.id))[0];
 }
 
 function arrangeTeam(team, orientation){
@@ -524,7 +537,7 @@ function arrangeTeamHierarchy(team){
   const idsInTeam = new Set(members.map(m => m.id));
   const childrenInTeam = pid => members.filter(m => m.parentId === pid);
   let roots = members.filter(m => !idsInTeam.has(m.parentId));
-  roots.sort((a,b) => depthOf(a.id) - depthOf(b.id));
+  roots.sort((a,b) => effectiveLevel(a.id) - effectiveLevel(b.id));
 
   const startX = Math.min(...members.map(n => n.x));
   const startY = Math.min(...members.map(n => n.y));
@@ -587,7 +600,7 @@ function renderTeamBoxes(){
 }
 
 function renderLegend(){
-  const depths = [...new Set(state.nodes.map(n => depthOf(n.id)))].sort((a,b)=>a-b);
+  const depths = [...new Set(state.nodes.map(n => effectiveLevel(n.id)))].sort((a,b)=>a-b);
   const legend = document.getElementById('legend');
   const hasSecondary = state.nodes.some(n => (n.secondaryParentIds||[]).length);
   const hasArea = state.nodes.some(n => n.area);
@@ -984,6 +997,7 @@ function openModal(nodeId, parentPreset){
     delBtn.style.display = 'inline-flex';
     bulkField.style.display = 'none';
     document.querySelector(`input[name="fArea"][value="${node.area || ''}"]`).checked = true;
+    document.getElementById('fRank').value = (typeof node.rank === 'number') ? node.rank : '';
     modalTeams = [...(node.teams||[])];
   } else {
     title.textContent = 'Nuevo cargo';
@@ -994,6 +1008,7 @@ function openModal(nodeId, parentPreset){
     delBtn.style.display = 'none';
     bulkField.style.display = 'block';
     document.querySelector('input[name="fArea"][value=""]').checked = true;
+    document.getElementById('fRank').value = '';
     modalTeams = [];
   }
   renderTeamChips();
@@ -1011,6 +1026,8 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
   const parentId = document.getElementById('fParent').value || null;
   const secondaryParentIds = Array.from(document.querySelectorAll('#secondaryList input:checked')).map(i => i.value);
   const area = document.querySelector('input[name="fArea"]:checked').value || null;
+  const rankRaw = document.getElementById('fRank').value;
+  const rank = rankRaw !== '' ? Math.max(1, parseInt(rankRaw, 10)) : null;
   const pendingTeamText = document.getElementById('fTeamInput').value.trim();
   if(pendingTeamText && !modalTeams.includes(pendingTeamText)) modalTeams.push(pendingTeamText);
   const teams = [...modalTeams];
@@ -1021,17 +1038,17 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
     const node = nodeById(editingId);
     if(!name){ toast('Poné un nombre para el cargo.'); return; }
     node.name = name; node.role = role; node.parentId = parentId;
-    node.secondaryParentIds = secondaryParentIds; node.area = area; node.teams = teams;
+    node.secondaryParentIds = secondaryParentIds; node.area = area; node.teams = teams; node.rank = rank;
   } else if(bulkNames.length){
     bulkNames.forEach(n => {
       const pos = newNodePosition(parentId);
-      state.nodes.push({ id: uid(), name: n, role: '', parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], x: pos.x, y: pos.y });
+      state.nodes.push({ id: uid(), name: n, role: '', parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, x: pos.x, y: pos.y });
     });
     toast(`${bulkNames.length} cargos agregados, todos al mismo nivel.`);
   } else {
     if(!name){ toast('Poné un nombre, o usá el campo de varios cargos.'); return; }
     const pos = newNodePosition(parentId);
-    state.nodes.push({ id: uid(), name, role, parentId, secondaryParentIds, area, teams, x: pos.x, y: pos.y });
+    state.nodes.push({ id: uid(), name, role, parentId, secondaryParentIds, area, teams, rank, x: pos.x, y: pos.y });
   }
   await saveState();
   closeModal();
