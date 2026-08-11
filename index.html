@@ -404,8 +404,24 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<
 
 function autoLayout(){
   let cursor = START_X;
+  // At every level, siblings that share a home team get placed next to each
+  // other (in first-appearance order), so a team's box never has to stretch
+  // around an unrelated sibling sitting in between. Siblings without a team
+  // keep their normal relative order.
+  function orderedChildren(pid){
+    const kids = childrenOf(pid);
+    const groups = new Map();
+    const order = [];
+    kids.forEach(k => {
+      const team = (k.teams||[])[0] || null;
+      const key = team || ('__solo_' + k.id);
+      if(!groups.has(key)){ groups.set(key, []); order.push(key); }
+      groups.get(key).push(k);
+    });
+    return order.flatMap(key => groups.get(key));
+  }
   function place(node){
-    const kids = childrenOf(node.id);
+    const kids = orderedChildren(node.id);
     if(!kids.length){
       node.x = cursor; cursor += CARD_W + CARD_GAP_X;
     } else {
@@ -786,21 +802,39 @@ function drawLinks(){
     return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
   }
 
-  // Whoever leads a team (its highest-hierarchy home member) has their
-  // incoming line from an outside boss redirected to the team's box instead
-  // of their own card — the box already represents "this whole team", so
-  // poking a line through it to one card inside reads as a duplicate line.
+  // Any home member whose boss is OUTSIDE the team is an "entry point" into
+  // that team from the general org chart. Every entry point that shares the
+  // exact same outside boss gets merged into ONE line to the team's box
+  // (anchored on whichever boss the leader answers to, when there is one) —
+  // otherwise each of them would draw its own separate line, which is the
+  // "double line" people see when more than one member reports to the same
+  // outside superior.
   const teamNames = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(t => t.trim()).filter(Boolean))];
   const consolidatedParentByTeam = {};
   const collapsedChildIds = new Set();
   teamNames.forEach(team => {
     const members = homeMembersOf(team);
     if(!members.length) return;
+    const memberIds = new Set(members.map(m => m.id));
+    const entryPoints = members.filter(m => m.parentId && !memberIds.has(m.parentId));
+    if(!entryPoints.length) return;
+
+    const byParent = {};
+    entryPoints.forEach(m => { (byParent[m.parentId] = byParent[m.parentId] || []).push(m); });
+
     const leader = teamLeader(members);
-    if(leader && leader.parentId && !members.some(m => m.id === leader.parentId)){
-      consolidatedParentByTeam[team] = leader.parentId;
-      collapsedChildIds.add(leader.id);
+    let mainParent = (leader && leader.parentId && !memberIds.has(leader.parentId)) ? leader.parentId : null;
+    if(!mainParent){
+      let best = null, bestCount = 0;
+      Object.entries(byParent).forEach(([pid, list]) => { if(list.length > bestCount){ best = pid; bestCount = list.length; } });
+      mainParent = best;
     }
+    if(mainParent){
+      consolidatedParentByTeam[team] = mainParent;
+      (byParent[mainParent] || []).forEach(m => collapsedChildIds.add(m.id));
+    }
+    // entry points reporting to a genuinely different outside boss keep their
+    // own individual line — that's a real, distinct relationship, not a bug.
   });
 
   Object.entries(consolidatedParentByTeam).forEach(([team, parentId]) => {
@@ -857,9 +891,20 @@ function drawLinks(){
       e.stopPropagation();
       const team = p.getAttribute('data-team');
       if(team){
-        if(confirm(`¿Quitar el vínculo del equipo "${team}" con su superior? Su líder pasará a ser de nivel superior (raíz), y el resto del equipo lo sigue.`)){
-          const leader = teamLeader(homeMembersOf(team));
-          if(leader) leader.parentId = null;
+        if(confirm(`¿Quitar el vínculo del equipo "${team}" con su superior? Quienes reportaban a ese jefe pasarán a ser de nivel superior (raíz); el resto del equipo los sigue.`)){
+          const members = homeMembersOf(team);
+          const memberIds = new Set(members.map(m => m.id));
+          const entryPoints = members.filter(m => m.parentId && !memberIds.has(m.parentId));
+          const byParent = {};
+          entryPoints.forEach(m => { (byParent[m.parentId] = byParent[m.parentId] || []).push(m); });
+          const leader = teamLeader(members);
+          let mainParent = (leader && leader.parentId && !memberIds.has(leader.parentId)) ? leader.parentId : null;
+          if(!mainParent){
+            let best = null, bestCount = 0;
+            Object.entries(byParent).forEach(([pid, list]) => { if(list.length > bestCount){ best = pid; bestCount = list.length; } });
+            mainParent = best;
+          }
+          (mainParent ? (byParent[mainParent] || []) : []).forEach(m => { m.parentId = null; });
           await saveState();
           render();
         }
