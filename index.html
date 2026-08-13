@@ -243,7 +243,7 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional</h1>
-      <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como dependencia principal; con <strong>Shift</strong>, como secundaria. Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
+      <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como superior principal; mantené <strong>Shift</strong> y repetí con cada superior adicional (sin límite: podés sumarle 2, 3 o más). Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <div class="search-box">
@@ -256,7 +256,8 @@
       <div class="dropdown">
         <button class="btn btn-ghost" id="btnDownload">Descargar ▾</button>
         <div class="dropdown-menu" id="downloadMenu">
-          <button type="button" id="btnExportPng">🖼️ Imagen (PNG)</button>
+          <button type="button" id="btnExportPng">🖼️ Imagen (PNG) — con título y leyenda</button>
+          <button type="button" id="btnExportJpg">🖼️ Imagen (JPG) — solo el organigrama</button>
           <button type="button" id="btnExportJson">💾 Copia de respaldo (JSON)</button>
           <div class="menu-hint">La copia JSON sirve para llevar el organigrama a otra compu o restaurarlo con "Importar".</div>
         </div>
@@ -332,13 +333,14 @@
         <div class="field-note">Si completás esto, se ignora el campo "Nombre del cargo" de arriba y se crea un cargo por cada línea, todos al mismo nivel y con la misma Área.</div>
       </div>
       <div class="field">
-        <label for="fParent">Depende de (línea sólida)</label>
+        <label for="fParent">Superior principal (línea sólida)</label>
         <select id="fParent"></select>
+        <div class="field-note">Este define la posición del cargo en el organigrama. Elegí el más "estructural" de sus superiores.</div>
       </div>
       <div class="field">
-        <label>También depende de (línea punteada, opcional)</label>
+        <label>Otros superiores (podés marcar todos los que necesites)</label>
         <div class="sub-list" id="secondaryList"></div>
-        <div class="field-note">Marcá otros cargos si esta persona reporta a más de un superior.</div>
+        <div class="field-note">No hay límite: si reporta a 2, 3 o más personas además de su superior principal, marcalas acá — quedan con línea punteada, sin cambiar dónde se ubica en el árbol.</div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-danger" id="btnDelete" style="display:none;">Eliminar</button>
@@ -1380,6 +1382,24 @@ document.getElementById('btnExportPng').addEventListener('click', async () => {
     toast('No se pudo generar la imagen. Probá de nuevo.');
   }
 });
+
+document.getElementById('btnExportJpg').addEventListener('click', async () => {
+  downloadMenu.classList.remove('open');
+  if(!state.nodes.length){ toast('No hay nada para descargar todavía.'); return; }
+  toast('Generando imagen…');
+  try{
+    const chartCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale: 2 });
+    const link = document.createElement('a');
+    link.download = 'organigrama-institucional.jpg';
+    link.href = chartCanvas.toDataURL('image/jpeg', 0.92);
+    document.body.appendChild(link); link.click(); link.remove();
+    toast('Imagen JPG descargada.');
+  }catch(err){
+    console.error(err);
+    toast('No se pudo generar la imagen. Probá de nuevo.');
+  }
+});
+
 
 /* ---------- import ---------- */
 document.getElementById('btnImport').addEventListener('click', () => document.getElementById('fileImport').click());
