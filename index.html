@@ -6,6 +6,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --bg: #F6F3EC;
@@ -28,7 +30,14 @@
     display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;
     background: linear-gradient(180deg, #FBF9F4 0%, var(--bg) 100%); flex:none;
   }
-  .title-block h1{ font-family:'Fraunces', serif; font-weight:700; font-size:26px; margin:0 0 3px 0; letter-spacing:-0.01em; }
+  .title-block h1{ font-family:'Fraunces', serif; font-weight:700; font-size:26px; margin:0 0 3px 0; letter-spacing:-0.01em; display:flex; align-items:center; gap:10px; }
+  .conn-badge{
+    font-family:'IBM Plex Sans', sans-serif; font-size:11px; font-weight:600; letter-spacing:.03em;
+    padding:3px 10px; border-radius:20px; vertical-align:middle;
+  }
+  .conn-cloud{ background:#DCE7E3; color:#255A52; }
+  .conn-local{ background:#EFEAE0; color:var(--ink-soft); }
+  .conn-error{ background:#F3DCDC; color:#8A2F2F; }
   .title-block p{ margin:0; color: var(--ink-soft); font-size:13px; max-width:520px; line-height:1.4; }
   .header-actions{ display:flex; gap:10px; align-items:center; }
   button{ font-family:'IBM Plex Sans', sans-serif; cursor:pointer; }
@@ -108,6 +117,9 @@
 
   .card-wrap{ position:absolute; width:190px; touch-action:none; z-index:2; }
   .card-wrap.dragging{ z-index:30; }
+  .card-wrap.pinned .card{ box-shadow: 0 0 0 2px var(--ink); cursor:default; }
+  .card-wrap.pinned .card:hover{ box-shadow: 0 0 0 2px var(--ink); }
+  .icon-btn.pin-active{ background:var(--ink); color:#fff; }
   .card-wrap.link-target .card{ outline:2px solid var(--c1); outline-offset:2px; }
   .card{
     display:block; background: var(--paper); border:1px solid var(--line);
@@ -143,6 +155,27 @@
   .field input:focus, .field select:focus{ outline:2px solid var(--ring); outline-offset:1px; }
   .modal-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:18px; gap:8px; }
   .modal-actions .right{ display:flex; gap:8px; }
+
+  .profile-modal{ width:400px; }
+  .profile-header{ display:flex; align-items:flex-start; gap:10px; margin-bottom:4px; }
+  .profile-header .bar{ width:5px; align-self:stretch; border-radius:3px; flex:none; min-height:38px; }
+  .profile-name{ font-family:'Fraunces', serif; font-weight:700; font-size:19px; line-height:1.25; }
+  .profile-people{ font-size:13px; color:var(--ink-soft); margin-top:2px; }
+  .profile-tags{ display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 4px 0; }
+  .profile-section{ margin-top:16px; }
+  .profile-section h4{
+    font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft);
+    margin:0 0 8px 0; font-weight:700;
+  }
+  .profile-tasks{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
+  .profile-tasks li{
+    font-size:13.5px; line-height:1.4; padding-left:18px; position:relative;
+  }
+  .profile-tasks li::before{
+    content:'✓'; position:absolute; left:0; top:0; color:var(--c1); font-weight:700; font-size:12px;
+  }
+  .profile-empty{ font-size:13px; color:var(--ink-soft); font-style:italic; }
+  .profile-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
 
   .dropdown{ position:relative; }
   .dropdown-menu{
@@ -242,7 +275,7 @@
 <div class="app">
   <header>
     <div class="title-block">
-      <h1>Organigrama Institucional</h1>
+      <h1>Organigrama Institucional <span id="connBadge" class="conn-badge conn-local">💾 Guardado local</span></h1>
       <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como superior principal; mantené <strong>Shift</strong> y repetí con cada superior adicional (sin límite: podés sumarle 2, 3 o más). Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
@@ -333,6 +366,10 @@
         <div class="field-note">Si completás esto, se ignora el campo "Nombre del cargo" de arriba y se crea un cargo por cada línea, todos al mismo nivel y con la misma Área.</div>
       </div>
       <div class="field">
+        <label for="fTasks">Tareas / responsabilidades (opcional, una por línea)</label>
+        <textarea id="fTasks" placeholder="Ej:&#10;Coordinar reuniones de equipo&#10;Supervisar planificación pedagógica&#10;Atender consultas de familias"></textarea>
+      </div>
+      <div class="field">
         <label for="fParent">Superior principal (línea sólida)</label>
         <select id="fParent"></select>
         <div class="field-note">Este define la posición del cargo en el organigrama. Elegí el más "estructural" de sus superiores.</div>
@@ -353,10 +390,69 @@
   </div>
 </div>
 
+<div class="overlay" id="profileOverlay">
+  <div class="modal profile-modal" id="profileModalContent"></div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 const STORAGE_KEY = 'orgchart:state:v2';
+
+// ======== FIREBASE ========
+// Pegá acá el objeto que te da Firebase al registrar la app web
+// (Configuración del proyecto → Tus apps → ícono "</>").
+// Mientras diga "TU_API_KEY", la app sigue funcionando con guardado local
+// (solo vos, en este chat) como respaldo — no se rompe nada.
+const firebaseConfig = {
+  apiKey: "AIzaSyCNcAC9j0sR9sW-Weh9eKVvMq2cOl-XHnI",
+  authDomain: "orgama-80bd1.firebaseapp.com",
+  projectId: "orgama-80bd1",
+  storageBucket: "orgama-80bd1.firebasestorage.app",
+  messagingSenderId: "27604905736",
+  appId: "1:27604905736:web:e5605849aff280303846bd"
+};
+const FIREBASE_CONFIGURED = !!(firebaseConfig.apiKey && firebaseConfig.apiKey !== 'TU_API_KEY');
+
+let fsDb = null;
+let fsDocRef = null;
+let fsUnsubscribe = null;
+
+if(FIREBASE_CONFIGURED){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    fsDb = firebase.firestore();
+    fsDocRef = fsDb.collection('organigramas').doc('institucional');
+  }catch(err){
+    console.error('No se pudo inicializar Firebase', err);
+    fsDb = null; fsDocRef = null;
+  }
+}
+
+function setConnBadge(mode){
+  const el = document.getElementById('connBadge');
+  if(!el) return;
+  if(mode === 'cloud'){ el.textContent = '☁ Conectado (Firebase)'; el.className = 'conn-badge conn-cloud'; }
+  else if(mode === 'error'){ el.textContent = '⚠ Sin conexión a la base'; el.className = 'conn-badge conn-error'; }
+  else { el.textContent = '💾 Guardado local (este chat)'; el.className = 'conn-badge conn-local'; }
+}
+
+function subscribeRealtime(){
+  if(!fsDocRef || fsUnsubscribe) return;
+  fsUnsubscribe = fsDocRef.onSnapshot(snap => {
+    if(snap.metadata.hasPendingWrites) return; // echo of our own write, ignore
+    const parsed = snap.data();
+    if(!parsed || !Array.isArray(parsed.nodes)) return;
+    state = parsed;
+    migrateState();
+    render();
+    setConnBadge('cloud');
+  }, err => {
+    console.error('Error de conexión en tiempo real', err);
+    setConnBadge('error');
+  });
+}
+
 const COLORS = ['c0','c1','c2','c3','c4','c5'];
 const CARD_W = 190, CARD_GAP_X = 30, LEVEL_H = 150, START_X = 50, START_Y = 40;
 
@@ -425,9 +521,11 @@ function autoLayout(){
   function place(node){
     const kids = orderedChildren(node.id);
     if(!kids.length){
+      if(node.pinned){ return; } // stays exactly where it was pinned
       node.x = cursor; cursor += CARD_W + CARD_GAP_X;
     } else {
       kids.forEach(place);
+      if(node.pinned){ return; }
       node.x = (kids[0].x + kids[kids.length-1].x) / 2;
     }
     node.y = START_Y + effectiveLevel(node.id) * LEVEL_H;
@@ -459,36 +557,79 @@ function seed(){
   autoLayout();
 }
 
+function migrateState(){
+  state.nodes.forEach(n => {
+    if(!Array.isArray(n.secondaryParentIds)) n.secondaryParentIds = [];
+    if(n.area === undefined) n.area = null;
+    if(!Array.isArray(n.teams)){
+      n.teams = (typeof n.team === 'string' && n.team.trim()) ? [n.team.trim()] : [];
+    }
+    if(n.rank === undefined) n.rank = null;
+    if(n.role2 === undefined) n.role2 = null;
+    if(n.pinned === undefined) n.pinned = false;
+    if(n.tasks === undefined) n.tasks = null;
+    delete n.team;
+  });
+  if(!Array.isArray(state.collapsedTeams)) state.collapsedTeams = [];
+  if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
+}
+
 async function loadState(){
+  if(fsDocRef){
+    try{
+      const snap = await fsDocRef.get();
+      if(snap.exists){
+        const parsed = snap.data();
+        if(parsed && Array.isArray(parsed.nodes)){
+          state = parsed;
+          migrateState();
+          subscribeRealtime();
+          setConnBadge('cloud');
+          return;
+        }
+      }
+      seed();
+      await saveState();
+      subscribeRealtime();
+      setConnBadge('cloud');
+      return;
+    }catch(err){
+      console.error('No se pudo conectar a Firebase, uso guardado local por ahora', err);
+      setConnBadge('error');
+    }
+  }
+  // fallback: personal local storage (no Firebase configured, or connection failed)
   try{
     const res = await window.storage.get(STORAGE_KEY, false);
     if(res && res.value){
       const parsed = JSON.parse(res.value);
       if(parsed && Array.isArray(parsed.nodes)){
         state = parsed;
-        state.nodes.forEach(n => {
-          if(!Array.isArray(n.secondaryParentIds)) n.secondaryParentIds = [];
-          if(n.area === undefined) n.area = null;
-          if(!Array.isArray(n.teams)){
-            n.teams = (typeof n.team === 'string' && n.team.trim()) ? [n.team.trim()] : [];
-          }
-          if(n.rank === undefined) n.rank = null;
-          if(n.role2 === undefined) n.role2 = null;
-          delete n.team;
-        });
-        if(!Array.isArray(state.collapsedTeams)) state.collapsedTeams = [];
-        if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
+        migrateState();
+        if(!FIREBASE_CONFIGURED) setConnBadge('local');
         return;
       }
     }
   }catch(e){ /* nothing saved yet */ }
   seed();
   await saveState();
+  if(!FIREBASE_CONFIGURED) setConnBadge('local');
 }
 async function saveState(){
+  if(fsDocRef){
+    try{
+      await fsDocRef.set(state);
+      return;
+    }catch(err){
+      console.error('No se pudo guardar en Firebase', err);
+      toast('No se pudo guardar en la base de datos, revisá la conexión.');
+      setConnBadge('error');
+    }
+  }
   try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
   catch(e){ console.error('No se pudo guardar', e); }
 }
+
 
 /* ---------- render ---------- */
 function updateFocusBanner(){
@@ -546,9 +687,11 @@ function render(){
       return `<span class="mini-team-chip${isPrimary ? ' primary' : ''}" style="${style}" title="${isPrimary ? 'Equipo principal' : 'También pertenece a'}">${escapeHtml(t)}</span>`;
     }).join('');
     cardsHtml += `
-      <div class="card-wrap${dimmed ? ' dimmed' : ''}${isMatch ? ' search-match' : ''}" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
+      <div class="card-wrap${dimmed ? ' dimmed' : ''}${isMatch ? ' search-match' : ''}${node.pinned ? ' pinned' : ''}" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
         <div class="card" style="border-left-color:${colorVar(depth)}">
           <div class="card-actions">
+            <button class="icon-btn${node.pinned ? ' pin-active' : ''}" data-action="pin" data-id="${node.id}" title="${node.pinned ? 'Desfijar (permitir moverla)' : 'Fijar (que no se mueva sola)'}">${node.pinned ? '📌' : '📍'}</button>
+            <button class="icon-btn" data-action="profile" data-id="${node.id}" title="Ver perfil">👤</button>
             <button class="icon-btn" data-action="dup" data-id="${node.id}" title="Duplicar">⎘</button>
             <button class="icon-btn" data-action="add" data-id="${node.id}" title="Agregar subordinado">+</button>
             <button class="icon-btn" data-action="edit" data-id="${node.id}" title="Editar">✎</button>
@@ -570,6 +713,19 @@ function render(){
   content.querySelectorAll('[data-action="add"]').forEach(b=>{
     b.addEventListener('click', e => { e.stopPropagation(); openModal(null, b.getAttribute('data-id')); });
   });
+  content.querySelectorAll('[data-action="profile"]').forEach(b=>{
+    b.addEventListener('click', e => { e.stopPropagation(); openProfile(b.getAttribute('data-id')); });
+  });
+  content.querySelectorAll('[data-action="pin"]').forEach(b=>{
+    b.addEventListener('click', async e => {
+      e.stopPropagation();
+      const node = nodeById(b.getAttribute('data-id'));
+      node.pinned = !node.pinned;
+      await saveState();
+      render();
+      toast(node.pinned ? 'Tarjeta fijada: no se va a mover sola.' : 'Tarjeta desfijada.');
+    });
+  });
   content.querySelectorAll('[data-action="dup"]').forEach(b=>{
     b.addEventListener('click', async e => {
       e.stopPropagation();
@@ -578,7 +734,8 @@ function render(){
         ...src, id: uid(), name: src.name + ' (copia)',
         x: src.x + 40, y: src.y + 40,
         secondaryParentIds: [...(src.secondaryParentIds||[])],
-        teams: [...(src.teams||[])]
+        teams: [...(src.teams||[])],
+        pinned: false
       };
       state.nodes.push(copy);
       await saveState();
@@ -611,7 +768,7 @@ function teamLeader(members){
 }
 
 function arrangeTeam(team, orientation){
-  const members = homeMembersOf(team);
+  const members = homeMembersOf(team).filter(n => !n.pinned);
   if(!members.length) return;
   const startX = Math.min(...members.map(n => n.x));
   const startY = Math.min(...members.map(n => n.y));
@@ -626,9 +783,10 @@ function arrangeTeam(team, orientation){
 
 // A team counts as "scattered" if its members don't fit within a single tidy
 // row or a single tidy column — e.g. someone dragged one member off to a far
-// corner, forcing the box to stretch across most of the canvas.
+// corner, forcing the box to stretch across most of the canvas. Pinned
+// members are never the ones that get moved, so they're left out of this check.
 function isTeamScattered(team){
-  const members = homeMembersOf(team);
+  const members = homeMembersOf(team).filter(n => !n.pinned);
   if(members.length < 2) return false;
   const CARD_H_EST = 130;
   const minX = Math.min(...members.map(m => m.x)), maxX = Math.max(...members.map(m => m.x));
@@ -644,9 +802,10 @@ function isTeamScattered(team){
 
 // Silently tidies a single team back into a compact row (or column, if it was
 // already taller than wide) — used automatically, not just from the ⬌/⬍ buttons.
+// Never touches pinned members.
 function compactTeamIfScattered(team){
   if(!isTeamScattered(team)) return false;
-  const members = homeMembersOf(team);
+  const members = homeMembersOf(team).filter(n => !n.pinned);
   const minX = Math.min(...members.map(m => m.x)), maxX = Math.max(...members.map(m => m.x));
   const minY = Math.min(...members.map(m => m.y)), maxY = Math.max(...members.map(m => m.y));
   const orientation = (maxY - minY) > (maxX - minX) ? 'vertical' : 'horizontal';
@@ -663,8 +822,9 @@ function compactAllScatteredTeams(){
 // Builds a mini org-chart for just this team's home members: whoever has the
 // highest overall hierarchy (lowest depth) anchors the top, and anyone whose
 // boss is also in the team nests below them, like a scaled-down organigrama.
+// Pinned members keep their spot; only unpinned ones get placed.
 function arrangeTeamHierarchy(team){
-  const members = homeMembersOf(team);
+  const members = homeMembersOf(team).filter(n => !n.pinned);
   if(members.length < 2) return;
   const idsInTeam = new Set(members.map(m => m.id));
   const childrenInTeam = pid => members.filter(m => m.parentId === pid);
@@ -977,7 +1137,7 @@ document.getElementById('canvasContent').addEventListener('pointerdown', e => {
   const teamBox = e.target.closest('.team-box');
   if(teamBox){
     const team = teamBox.getAttribute('data-team');
-    const members = homeMembersOf(team);
+    const members = homeMembersOf(team).filter(n => !n.pinned);
     teamDragState = {
       team,
       startX: e.clientX,
@@ -1002,6 +1162,10 @@ document.getElementById('canvasContent').addEventListener('pointerdown', e => {
   if(!wrap || e.target.closest('.icon-btn')) return;
   const id = wrap.getAttribute('data-id');
   const node = nodeById(id);
+  if(node.pinned){
+    toast('Esta tarjeta está fijada. Tocá el 📌 para desfijarla y poder moverla.');
+    return;
+  }
   const contentRect = document.getElementById('canvasContent').getBoundingClientRect();
   dragState = {
     id,
@@ -1187,6 +1351,7 @@ function openModal(nodeId, parentPreset){
     nameInput.value = node.name;
     roleInput.value = node.role || '';
     document.getElementById('fRole2').value = node.role2 || '';
+    document.getElementById('fTasks').value = node.tasks || '';
     populateParentSelect(nodeId);
     document.getElementById('fParent').value = node.parentId || '';
     delBtn.style.display = 'inline-flex';
@@ -1199,6 +1364,7 @@ function openModal(nodeId, parentPreset){
     nameInput.value = '';
     roleInput.value = '';
     document.getElementById('fRole2').value = '';
+    document.getElementById('fTasks').value = '';
     populateParentSelect(null);
     document.getElementById('fParent').value = parentPreset || '';
     delBtn.style.display = 'none';
@@ -1213,6 +1379,76 @@ function openModal(nodeId, parentPreset){
   setTimeout(()=> nameInput.focus(), 30);
 }
 function closeModal(){ document.getElementById('overlay').classList.remove('open'); editingId = null; }
+
+function openProfile(nodeId){
+  const node = nodeById(nodeId);
+  if(!node) return;
+  const depth = effectiveLevel(node.id);
+  const color = colorVar(depth);
+  const levelLabel = state.levelNames[depth] || `Nivel ${depth+1}`;
+
+  const peopleLines = [node.role, node.role2].filter(Boolean);
+  const peopleHtml = peopleLines.length
+    ? peopleLines.map(p => escapeHtml(p)).join('<br>')
+    : '<span class="profile-empty">Sin persona asignada</span>';
+
+  const tags = [];
+  if(node.area === 'gestion') tags.push(`<span class="badge badge-gestion">Gestión</span>`);
+  if(node.area === 'pedagogico') tags.push(`<span class="badge badge-pedagogico">Pedagógico</span>`);
+  (node.teams||[]).forEach((t, idx) => {
+    const allTeams = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(x => x.trim()).filter(Boolean))].sort();
+    const tIdx = allTeams.indexOf(t);
+    const c = TEAM_COLORS[tIdx % TEAM_COLORS.length];
+    const style = idx === 0 ? `background:${c}; border-color:${c};` : `color:${c}; border-color:${c};`;
+    tags.push(`<span class="mini-team-chip${idx === 0 ? ' primary' : ''}" style="${style}">${escapeHtml(t)}</span>`);
+  });
+
+  const taskItems = (node.tasks || '').split('\n').map(t => t.trim()).filter(Boolean);
+  const tasksHtml = taskItems.length
+    ? `<ul class="profile-tasks">${taskItems.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`
+    : `<div class="profile-empty">Todavía no se cargaron tareas para este cargo.</div>`;
+
+  const superiors = [];
+  if(node.parentId){ const p = nodeById(node.parentId); if(p) superiors.push(escapeHtml(p.name)); }
+  (node.secondaryParentIds||[]).forEach(id => { const p = nodeById(id); if(p) superiors.push(escapeHtml(p.name)); });
+  const superiorsHtml = superiors.length ? superiors.join(', ') : '<span class="profile-empty">Sin superior (nivel más alto)</span>';
+
+  document.getElementById('profileModalContent').innerHTML = `
+    <div class="profile-header">
+      <div class="bar" style="background:${color};"></div>
+      <div>
+        <div class="profile-name">${escapeHtml(node.name)}</div>
+        <div class="profile-people">${peopleHtml}</div>
+      </div>
+    </div>
+    <div class="profile-tags">${tags.join('') || ''}</div>
+    <div class="profile-section">
+      <h4>Nivel jerárquico</h4>
+      <div style="font-size:13.5px;">${escapeHtml(levelLabel)}</div>
+    </div>
+    <div class="profile-section">
+      <h4>Depende de</h4>
+      <div style="font-size:13.5px;">${superiorsHtml}</div>
+    </div>
+    <div class="profile-section">
+      <h4>Tareas / responsabilidades</h4>
+      ${tasksHtml}
+    </div>
+    <div class="profile-actions">
+      <button type="button" class="btn btn-ghost" id="btnCloseProfile">Cerrar</button>
+      <button type="button" class="btn btn-primary" id="btnEditFromProfile">Editar cargo</button>
+    </div>
+  `;
+  document.getElementById('profileOverlay').classList.add('open');
+  document.getElementById('btnCloseProfile').addEventListener('click', closeProfile);
+  document.getElementById('btnEditFromProfile').addEventListener('click', () => {
+    closeProfile();
+    openModal(nodeId, null);
+  });
+}
+function closeProfile(){ document.getElementById('profileOverlay').classList.remove('open'); }
+document.getElementById('profileOverlay').addEventListener('click', e => { if(e.target.id === 'profileOverlay') closeProfile(); });
+
 document.getElementById('fParent').addEventListener('change', () => populateSecondaryList(editingId));
 
 document.getElementById('nodeForm').addEventListener('submit', async e => {
@@ -1220,6 +1456,7 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
   const name = document.getElementById('fName').value.trim();
   const role = document.getElementById('fRole').value.trim();
   const role2 = document.getElementById('fRole2').value.trim();
+  const tasks = document.getElementById('fTasks').value.trim() || null;
   const parentId = document.getElementById('fParent').value || null;
   const secondaryParentIds = Array.from(document.querySelectorAll('#secondaryList input:checked')).map(i => i.value);
   const area = document.querySelector('input[name="fArea"]:checked').value || null;
@@ -1236,16 +1473,17 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
     if(!name){ toast('Poné un nombre para el cargo.'); return; }
     node.name = name; node.role = role; node.role2 = role2 || null; node.parentId = parentId;
     node.secondaryParentIds = secondaryParentIds; node.area = area; node.teams = teams; node.rank = rank;
+    node.tasks = tasks;
   } else if(bulkNames.length){
     bulkNames.forEach(n => {
       const pos = newNodePosition(parentId);
-      state.nodes.push({ id: uid(), name: n, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, x: pos.x, y: pos.y });
+      state.nodes.push({ id: uid(), name: n, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks, pinned: false, x: pos.x, y: pos.y });
     });
     toast(`${bulkNames.length} cargos agregados, todos al mismo nivel.`);
   } else {
     if(!name){ toast('Poné un nombre, o usá el campo de varios cargos.'); return; }
     const pos = newNodePosition(parentId);
-    state.nodes.push({ id: uid(), name, role, role2: role2 || null, parentId, secondaryParentIds, area, teams, rank, x: pos.x, y: pos.y });
+    state.nodes.push({ id: uid(), name, role, role2: role2 || null, parentId, secondaryParentIds, area, teams, rank, tasks, pinned: false, x: pos.x, y: pos.y });
   }
   teams.forEach(t => compactTeamIfScattered(t));
   await saveState();
