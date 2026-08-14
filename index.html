@@ -181,6 +181,13 @@
   .profile-tasks li::before{
     content:'✓'; position:absolute; left:0; top:0; color:var(--c1); font-weight:700; font-size:12px;
   }
+  .profile-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .profile-list li{
+    font-size:13.5px; line-height:1.4; padding-left:16px; position:relative;
+  }
+  .profile-list li::before{
+    content:'•'; position:absolute; left:2px; top:0; color:var(--ink-soft); font-weight:700;
+  }
   .profile-empty{ font-size:13px; color:var(--ink-soft); font-style:italic; }
   .profile-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
 
@@ -283,6 +290,7 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional <span id="connBadge" class="conn-badge conn-local">💾 Guardado local</span></h1>
+      <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como superior principal; mantené <strong>Shift</strong> y repetí con cada superior adicional (sin límite: podés sumarle 2, 3 o más). Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <div class="search-box">
@@ -750,7 +758,7 @@ function render(){
       state.nodes.push(copy);
       await saveState();
       render();
-      toast('Cargo duplicado. Podés renombrarlo y arrastrarlo donde quieras.');
+      toast('Cargo duplicado. Podés renombrarlo y lo donde quieras.');
     });
   });
 
@@ -1011,12 +1019,6 @@ function renderLegend(){
     html += `<div class="legend-item" style="border-left:1px solid var(--line); padding-left:16px;">
       <span class="badge badge-gestion" style="margin-top:0;">Gestión</span>
       <span class="badge badge-pedagogico" style="margin-top:0;">Pedagógico</span>
-    </div>`;
-  }
-  if(hasSecondary){
-    html += `<div class="legend-item" style="border-left:1px solid var(--line); padding-left:16px;">
-      <svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#3E7C74" stroke-width="2" stroke-dasharray="5,4"/></svg>
-      <span>Dependencia secundaria</span>
     </div>`;
   }
   legend.innerHTML = html;
@@ -1460,55 +1462,96 @@ function openModal(nodeId, parentPreset){
 }
 function closeModal(){ document.getElementById('overlay').classList.remove('open'); editingId = null; }
 
+function personIdentities(node){
+  return [node.role, node.role2].map(s => (s||'').trim().toLowerCase()).filter(Boolean);
+}
+// Finds every node where the same person's name shows up (in "role" or
+// "role2"), so someone holding two different cargos gets one combined profile.
+function findPersonNodes(node){
+  const idents = personIdentities(node);
+  if(!idents.length) return [node];
+  const matched = state.nodes.filter(n => personIdentities(n).some(i => idents.includes(i)));
+  return matched.length ? matched : [node];
+}
+
 function openProfile(nodeId){
   const node = nodeById(nodeId);
   if(!node) return;
-  const depth = effectiveLevel(node.id);
-  const color = colorVar(depth);
-  const levelLabel = state.levelNames[depth] || `Nivel ${depth+1}`;
+  const personNodes = findPersonNodes(node);
+  const isMerged = personNodes.length > 1;
+  const personName = node.role || node.role2 || '';
+  const allTeamsGlobal = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(x => x.trim()).filter(Boolean))].sort();
 
-  const peopleLines = [node.role, node.role2].filter(Boolean);
-  const peopleHtml = peopleLines.length
-    ? peopleLines.map(p => escapeHtml(p)).join('<br>')
-    : '<span class="profile-empty">Sin persona asignada</span>';
-
-  const tags = [];
-  if(node.area === 'gestion') tags.push(`<span class="badge badge-gestion">Gestión</span>`);
-  if(node.area === 'pedagogico') tags.push(`<span class="badge badge-pedagogico">Pedagógico</span>`);
-  (node.teams||[]).forEach((t, idx) => {
-    const allTeams = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(x => x.trim()).filter(Boolean))].sort();
-    const tIdx = allTeams.indexOf(t);
-    const c = TEAM_COLORS[tIdx % TEAM_COLORS.length];
-    const style = idx === 0 ? `background:${c}; border-color:${c};` : `color:${c}; border-color:${c};`;
-    tags.push(`<span class="mini-team-chip${idx === 0 ? ' primary' : ''}" style="${style}">${escapeHtml(t)}</span>`);
+  // tags: área + equipos, combined across every cargo this person holds, deduped
+  const tagMap = new Map();
+  personNodes.forEach(pn => {
+    if(pn.area === 'gestion') tagMap.set('area-gestion', `<span class="badge badge-gestion">Gestión</span>`);
+    if(pn.area === 'pedagogico') tagMap.set('area-pedagogico', `<span class="badge badge-pedagogico">Pedagógico</span>`);
+    (pn.teams||[]).forEach((t, idx) => {
+      const tIdx = allTeamsGlobal.indexOf(t);
+      const c = TEAM_COLORS[tIdx % TEAM_COLORS.length];
+      const style = idx === 0 ? `background:${c}; border-color:${c};` : `color:${c}; border-color:${c};`;
+      tagMap.set('team-' + t, `<span class="mini-team-chip${idx === 0 ? ' primary' : ''}" style="${style}">${escapeHtml(t)}</span>`);
+    });
   });
 
-  const taskItems = (node.tasks || '').split('\n').map(t => t.trim()).filter(Boolean);
+  // tasks combined across every cargo, labelled by cargo when merged
+  const taskItems = [];
+  personNodes.forEach(pn => {
+    (pn.tasks || '').split('\n').map(t => t.trim()).filter(Boolean).forEach(t => taskItems.push({ text: t, cargo: pn.name }));
+  });
   const tasksHtml = taskItems.length
-    ? `<ul class="profile-tasks">${taskItems.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`
-    : `<div class="profile-empty">Todavía no se cargaron tareas para este cargo.</div>`;
+    ? `<ul class="profile-tasks">${taskItems.map(t => `<li>${escapeHtml(t.text)}${isMerged ? ` <span style="color:var(--ink-soft); font-weight:400;">— ${escapeHtml(t.cargo)}</span>` : ''}</li>`).join('')}</ul>`
+    : `<div class="profile-empty">Todavía no se cargaron tareas.</div>`;
 
-  const superiors = [];
-  if(node.parentId){ const p = nodeById(node.parentId); if(p) superiors.push(escapeHtml(p.name)); }
-  (node.secondaryParentIds||[]).forEach(id => { const p = nodeById(id); if(p) superiors.push(escapeHtml(p.name)); });
-  const superiorsHtml = superiors.length ? superiors.join(', ') : '<span class="profile-empty">Sin superior (nivel más alto)</span>';
+  // superiors combined across every cargo, deduped by person
+  const superiorMap = new Map();
+  personNodes.forEach(pn => {
+    if(pn.parentId){ const p = nodeById(pn.parentId); if(p) superiorMap.set(p.id, p.name); }
+    (pn.secondaryParentIds || []).forEach(id => { const p = nodeById(id); if(p) superiorMap.set(p.id, p.name); });
+  });
+  const superiorsHtml = superiorMap.size
+    ? [...superiorMap.values()].map(n => escapeHtml(n)).join(', ')
+    : '<span class="profile-empty">Sin superior (nivel más alto)</span>';
+
+  // subordinates: anyone reporting (primary or secondary) into ANY of this person's cargos
+  const personNodeIds = new Set(personNodes.map(pn => pn.id));
+  const subMap = new Map();
+  state.nodes.forEach(n => {
+    if(personNodeIds.has(n.id)) return;
+    const reportsHere = personNodeIds.has(n.parentId) || (n.secondaryParentIds || []).some(id => personNodeIds.has(id));
+    if(reportsHere) subMap.set(n.id, n.role ? `${n.name} (${n.role})` : n.name);
+  });
+  const subsHtml = subMap.size
+    ? `<ul class="profile-list">${[...subMap.values()].map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`
+    : `<div class="profile-empty">Nadie reporta directamente a este cargo.</div>`;
+
+  const cargosHtml = personNodes.map(pn => {
+    const d = effectiveLevel(pn.id);
+    return `<span class="mini-team-chip" style="border-color:${colorVar(d)}; color:${colorVar(d)};">${escapeHtml(pn.name)}</span>`;
+  }).join(' ');
 
   document.getElementById('profileModalContent').innerHTML = `
     <div class="profile-header">
-      <div class="bar" style="background:${color};"></div>
+      <div class="bar" style="background:${colorVar(effectiveLevel(node.id))};"></div>
       <div>
-        <div class="profile-name">${escapeHtml(node.name)}</div>
-        <div class="profile-people">${peopleHtml}</div>
+        <div class="profile-name">${personName ? escapeHtml(personName) : escapeHtml(node.name)}</div>
+        <div class="profile-people">${personName ? escapeHtml(node.name) : '<span class="profile-empty">Sin persona asignada</span>'}${isMerged ? ` · ${personNodes.length} cargos` : ''}</div>
       </div>
     </div>
-    <div class="profile-tags">${tags.join('') || ''}</div>
+    <div class="profile-tags">${[...tagMap.values()].join('')}</div>
+    ${isMerged ? `
     <div class="profile-section">
-      <h4>Nivel jerárquico</h4>
-      <div style="font-size:13.5px;">${escapeHtml(levelLabel)}</div>
-    </div>
+      <h4>Cargos que ocupa</h4>
+      <div>${cargosHtml}</div>
+    </div>` : ''}
     <div class="profile-section">
       <h4>Depende de</h4>
       <div style="font-size:13.5px;">${superiorsHtml}</div>
+    </div>
+    <div class="profile-section">
+      <h4>Le reportan</h4>
+      ${subsHtml}
     </div>
     <div class="profile-section">
       <h4>Tareas / responsabilidades</h4>
