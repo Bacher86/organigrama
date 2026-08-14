@@ -624,6 +624,42 @@ function arrangeTeam(team, orientation){
   }
 }
 
+// A team counts as "scattered" if its members don't fit within a single tidy
+// row or a single tidy column — e.g. someone dragged one member off to a far
+// corner, forcing the box to stretch across most of the canvas.
+function isTeamScattered(team){
+  const members = homeMembersOf(team);
+  if(members.length < 2) return false;
+  const CARD_H_EST = 130;
+  const minX = Math.min(...members.map(m => m.x)), maxX = Math.max(...members.map(m => m.x));
+  const minY = Math.min(...members.map(m => m.y)), maxY = Math.max(...members.map(m => m.y));
+  const width = (maxX - minX) + CARD_W;
+  const height = (maxY - minY) + CARD_H_EST;
+  const compactRowWidth = members.length * (CARD_W + TEAM_GAP);
+  const compactColHeight = members.length * TEAM_ROW_H;
+  const fitsAsRow = width <= compactRowWidth * 1.2 && height <= CARD_H_EST * 1.6;
+  const fitsAsCol = height <= compactColHeight * 1.2 && width <= CARD_W * 1.6;
+  return !fitsAsRow && !fitsAsCol;
+}
+
+// Silently tidies a single team back into a compact row (or column, if it was
+// already taller than wide) — used automatically, not just from the ⬌/⬍ buttons.
+function compactTeamIfScattered(team){
+  if(!isTeamScattered(team)) return false;
+  const members = homeMembersOf(team);
+  const minX = Math.min(...members.map(m => m.x)), maxX = Math.max(...members.map(m => m.x));
+  const minY = Math.min(...members.map(m => m.y)), maxY = Math.max(...members.map(m => m.y));
+  const orientation = (maxY - minY) > (maxX - minX) ? 'vertical' : 'horizontal';
+  arrangeTeam(team, orientation);
+  return true;
+}
+function compactAllScatteredTeams(){
+  const teams = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(t => t.trim()).filter(Boolean))];
+  let changed = false;
+  teams.forEach(team => { if(compactTeamIfScattered(team)) changed = true; });
+  return changed;
+}
+
 // Builds a mini org-chart for just this team's home members: whoever has the
 // highest overall hierarchy (lowest depth) anchors the top, and anyone whose
 // boss is also in the team nests below them, like a scaled-down organigrama.
@@ -1211,6 +1247,7 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
     const pos = newNodePosition(parentId);
     state.nodes.push({ id: uid(), name, role, role2: role2 || null, parentId, secondaryParentIds, area, teams, rank, x: pos.x, y: pos.y });
   }
+  teams.forEach(t => compactTeamIfScattered(t));
   await saveState();
   closeModal();
   render();
@@ -1427,6 +1464,7 @@ document.getElementById('fileImport').addEventListener('change', e => {
 
 (async function init(){
   await loadState();
+  if(compactAllScatteredTeams()) await saveState();
   render();
 })();
 </script>
