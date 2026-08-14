@@ -283,7 +283,6 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional <span id="connBadge" class="conn-badge conn-local">💾 Guardado local</span></h1>
-      <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como superior principal; mantené <strong>Shift</strong> y repetí con cada superior adicional (sin límite: podés sumarle 2, 3 o más). Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <div class="search-box">
@@ -1214,7 +1213,11 @@ document.getElementById('canvasContent').addEventListener('pointerdown', e => {
       toast('Este equipo está fijado. Tocá el 📌 para desfijarlo y poder moverlo.');
       return;
     }
-    const members = homeMembersOf(team).filter(n => !n.pinned);
+    // Include individually-pinned members here on purpose: dragging the whole
+    // box is a deliberate action, and pinned people should travel with their
+    // team keeping their relative spot — their pin only protects them from
+    // automatic rearranging (Reacomodar, compactado, ⬌⬍🌳), not from this.
+    const members = homeMembersOf(team);
     teamDragState = {
       team,
       startX: e.clientX,
