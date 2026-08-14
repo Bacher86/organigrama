@@ -77,6 +77,8 @@
   .team-label:hover{ text-decoration:underline; }
   .team-box.dimmed-box{ opacity:.07; pointer-events:none; }
   .team-box.focused-box{ border-width:3px; z-index:1; }
+  .team-box.team-pinned{ border-style:solid; cursor:default; }
+  .team-box.team-pinned:hover{ background:rgba(34,49,79,.025); }
   .focus-banner{
     display:flex; align-items:center; gap:10px; padding:9px 28px; background:#22314F;
     color:#fff; font-size:13px; flex:none;
@@ -456,7 +458,7 @@ function subscribeRealtime(){
 const COLORS = ['c0','c1','c2','c3','c4','c5'];
 const CARD_W = 190, CARD_GAP_X = 30, LEVEL_H = 150, START_X = 50, START_Y = 40;
 
-let state = { nodes: [], levelNames: {}, collapsedTeams: [] };
+let state = { nodes: [], levelNames: {}, collapsedTeams: [], pinnedTeams: [] };
 let editingId = null;
 let dragState = null;
 let linkState = null;
@@ -520,12 +522,14 @@ function autoLayout(){
   }
   function place(node){
     const kids = orderedChildren(node.id);
+    const homeTeam = (node.teams||[])[0];
+    const locked = node.pinned || (homeTeam && isTeamPinned(homeTeam));
     if(!kids.length){
-      if(node.pinned){ return; } // stays exactly where it was pinned
+      if(locked){ return; } // stays exactly where it was pinned
       node.x = cursor; cursor += CARD_W + CARD_GAP_X;
     } else {
       kids.forEach(place);
-      if(node.pinned){ return; }
+      if(locked){ return; }
       node.x = (kids[0].x + kids[kids.length-1].x) / 2;
     }
     node.y = START_Y + effectiveLevel(node.id) * LEVEL_H;
@@ -571,6 +575,7 @@ function migrateState(){
     delete n.team;
   });
   if(!Array.isArray(state.collapsedTeams)) state.collapsedTeams = [];
+  if(!Array.isArray(state.pinnedTeams)) state.pinnedTeams = [];
   if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
 }
 
@@ -768,6 +773,7 @@ function teamLeader(members){
 }
 
 function arrangeTeam(team, orientation){
+  if(isTeamPinned(team)) return;
   const members = homeMembersOf(team).filter(n => !n.pinned);
   if(!members.length) return;
   const startX = Math.min(...members.map(n => n.x));
@@ -784,8 +790,9 @@ function arrangeTeam(team, orientation){
 // A team counts as "scattered" if its members don't fit within a single tidy
 // row or a single tidy column — e.g. someone dragged one member off to a far
 // corner, forcing the box to stretch across most of the canvas. Pinned
-// members are never the ones that get moved, so they're left out of this check.
+// members, and whole pinned teams, are never touched by this check.
 function isTeamScattered(team){
+  if(isTeamPinned(team)) return false;
   const members = homeMembersOf(team).filter(n => !n.pinned);
   if(members.length < 2) return false;
   const CARD_H_EST = 130;
@@ -802,8 +809,9 @@ function isTeamScattered(team){
 
 // Silently tidies a single team back into a compact row (or column, if it was
 // already taller than wide) — used automatically, not just from the ⬌/⬍ buttons.
-// Never touches pinned members.
+// Never touches pinned members or whole pinned teams.
 function compactTeamIfScattered(team){
+  if(isTeamPinned(team)) return false;
   if(!isTeamScattered(team)) return false;
   const members = homeMembersOf(team).filter(n => !n.pinned);
   const minX = Math.min(...members.map(m => m.x)), maxX = Math.max(...members.map(m => m.x));
@@ -819,33 +827,47 @@ function compactAllScatteredTeams(){
   return changed;
 }
 
-// Builds a mini org-chart for just this team's home members: whoever has the
-// highest overall hierarchy (lowest depth) anchors the top, and anyone whose
-// boss is also in the team nests below them, like a scaled-down organigrama.
-// Pinned members keep their spot; only unpinned ones get placed.
+// Builds a mini org-chart for just this team's home members: each one lands
+// on the row that matches their hierarchy level — the manual "Nivel
+// jerárquico" number if they have one set, or their tree depth otherwise —
+// so two people with the same rank end up side by side even if they aren't
+// directly connected as boss/report, and someone ranked 1 always sits above
+// someone ranked 3. Within a row, members try to line up under their in-team
+// parent (if there is one) for readability. Pinned members keep their spot.
 function arrangeTeamHierarchy(team){
+  if(isTeamPinned(team)) return;
   const members = homeMembersOf(team).filter(n => !n.pinned);
   if(members.length < 2) return;
   const idsInTeam = new Set(members.map(m => m.id));
-  const childrenInTeam = pid => members.filter(m => m.parentId === pid);
-  let roots = members.filter(m => !idsInTeam.has(m.parentId));
-  roots.sort((a,b) => effectiveLevel(a.id) - effectiveLevel(b.id));
+
+  const levels = [...new Set(members.map(m => effectiveLevel(m.id)))].sort((a,b) => a-b);
+  const rowOf = {};
+  levels.forEach((lvl, i) => { rowOf[lvl] = i; });
+
+  const rows = levels.map(() => []);
+  members.forEach(m => rows[rowOf[effectiveLevel(m.id)]].push(m));
+
+  // within each row (after the first), sort members near their in-team
+  // parent's current x, so related people stay visually grouped
+  rows.forEach((row, i) => {
+    if(i === 0) return;
+    row.sort((a, b) => {
+      const pa = idsInTeam.has(a.parentId) ? nodeById(a.parentId).x : Infinity;
+      const pb = idsInTeam.has(b.parentId) ? nodeById(b.parentId).x : Infinity;
+      return pa - pb;
+    });
+  });
 
   const startX = Math.min(...members.map(n => n.x));
   const startY = Math.min(...members.map(n => n.y));
-  let cursorX = startX;
-  function place(node, level){
-    const kids = childrenInTeam(node.id);
-    if(!kids.length){
-      node.x = cursorX;
-      cursorX += CARD_W + TEAM_GAP;
-    } else {
-      kids.forEach(k => place(k, level + 1));
-      node.x = (kids[0].x + kids[kids.length - 1].x) / 2;
-    }
-    node.y = startY + level * TEAM_ROW_H;
-  }
-  roots.forEach(r => place(r, 0));
+  rows.forEach((row, i) => {
+    let x = startX;
+    row.forEach(n => {
+      n.x = x;
+      n.y = startY + i * TEAM_ROW_H;
+      x += CARD_W + TEAM_GAP;
+    });
+  });
 }
 
 function isCollapsed(team){ return (state.collapsedTeams||[]).includes(team); }
@@ -853,6 +875,13 @@ function toggleCollapsed(team){
   state.collapsedTeams = state.collapsedTeams || [];
   if(isCollapsed(team)) state.collapsedTeams = state.collapsedTeams.filter(t => t !== team);
   else state.collapsedTeams.push(team);
+}
+
+function isTeamPinned(team){ return (state.pinnedTeams||[]).includes(team); }
+function toggleTeamPinned(team){
+  state.pinnedTeams = state.pinnedTeams || [];
+  if(isTeamPinned(team)) state.pinnedTeams = state.pinnedTeams.filter(t => t !== team);
+  else state.pinnedTeams.push(team);
 }
 
 function renderTeamBoxes(){
@@ -874,18 +903,20 @@ function renderTeamBoxes(){
     const color = TEAM_COLORS[i % TEAM_COLORS.length];
     const leader = teamLeader(allMembers);
     const collapsed = isCollapsed(team);
+    const pinned = isTeamPinned(team);
     const hiddenCount = collapsed ? allMembers.length - 1 : 0;
     const leaderTag = (leader && allMembers.length > 1) ? ` · Líder: ${escapeHtml(leader.name)}` : '';
     const countTag = hiddenCount > 0 ? ` · +${hiddenCount} más` : '';
-    const boxClass = focusedTeam ? (focusedTeam === team ? ' focused-box' : ' dimmed-box') : '';
+    const boxClass = (focusedTeam ? (focusedTeam === team ? ' focused-box' : ' dimmed-box') : '') + (pinned ? ' team-pinned' : '');
     html += `<div class="team-box${boxClass}" data-team="${escapeHtml(team)}" style="left:${minX}px; top:${minY}px; width:${maxX-minX}px; height:${maxY-minY}px; border-color:${color};">
-      <div class="team-label" style="color:${color}; border:1px solid ${color};" title="Tocá para ver solo el organigrama de este equipo">${escapeHtml(team)}${leaderTag}${countTag}</div>
+      <div class="team-label" style="color:${color}; border:1px solid ${color};" title="Tocá para ver solo el organigrama de este equipo">${pinned ? '📌 ' : ''}${escapeHtml(team)}${leaderTag}${countTag}</div>
       ${allMembers.length > 1 ? `
       <div class="team-controls">
-        ${!collapsed ? `
+        ${!collapsed && !pinned ? `
         <button type="button" class="team-arrange-btn${!isVertical ? ' active' : ''}" data-team="${escapeHtml(team)}" data-orient="horizontal" title="Acomodar en fila">⬌</button>
         <button type="button" class="team-arrange-btn${isVertical ? ' active' : ''}" data-team="${escapeHtml(team)}" data-orient="vertical" title="Acomodar en columna">⬍</button>
-        <button type="button" class="team-arrange-btn" data-team="${escapeHtml(team)}" data-orient="hierarchy" title="Armar según jerarquía (el de mayor rango arriba)">🌳</button>` : ''}
+        <button type="button" class="team-arrange-btn" data-team="${escapeHtml(team)}" data-orient="hierarchy" title="Armar por Nivel jerárquico: una fila por cada rango, el 1 arriba">🌳</button>` : ''}
+        ${!collapsed ? `<button type="button" class="team-arrange-btn${pinned ? ' active' : ''}" data-team="${escapeHtml(team)}" data-orient="pin" title="${pinned ? 'Desfijar equipo (permitir reacomodarlo)' : 'Fijar equipo (que no se mueva ni se reacomode solo)'}">${pinned ? '📌' : '📍'}</button>` : ''}
         <button type="button" class="team-arrange-btn" data-team="${escapeHtml(team)}" data-orient="collapse" title="${collapsed ? 'Expandir equipo' : 'Colapsar equipo (mostrar solo el líder)'}">${collapsed ? '▸' : '▾'}</button>
         <button type="button" class="team-arrange-btn" data-team="${escapeHtml(team)}" data-orient="export" title="Descargar imagen de este equipo">⬇</button>
       </div>` : ''}
@@ -914,6 +945,12 @@ function renderTeamBoxes(){
       if(orient === 'hierarchy'){ arrangeTeamHierarchy(team); await saveState(); render(); }
       else if(orient === 'collapse'){ toggleCollapsed(team); await saveState(); render(); }
       else if(orient === 'export'){ await exportTeamPng(team); }
+      else if(orient === 'pin'){
+        toggleTeamPinned(team);
+        await saveState();
+        render();
+        toast(isTeamPinned(team) ? `Equipo "${team}" fijado: no se va a mover ni reacomodar solo.` : `Equipo "${team}" desfijado.`);
+      }
       else { arrangeTeam(team, orient); await saveState(); render(); }
     });
   });
@@ -1137,6 +1174,10 @@ document.getElementById('canvasContent').addEventListener('pointerdown', e => {
   const teamBox = e.target.closest('.team-box');
   if(teamBox){
     const team = teamBox.getAttribute('data-team');
+    if(isTeamPinned(team)){
+      toast('Este equipo está fijado. Tocá el 📌 para desfijarlo y poder moverlo.');
+      return;
+    }
     const members = homeMembersOf(team).filter(n => !n.pinned);
     teamDragState = {
       team,
@@ -1551,7 +1592,7 @@ document.getElementById('btnArrange').addEventListener('click', async () => {
 });
 document.getElementById('btnReset').addEventListener('click', async () => {
   if(!confirm('Esto borra todo el organigrama actual. ¿Continuar?')) return;
-  state = { nodes: [], levelNames: {}, collapsedTeams: [] };
+  state = { nodes: [], levelNames: {}, collapsedTeams: [], pinnedTeams: [] };
   await saveState();
   render();
 });
