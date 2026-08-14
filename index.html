@@ -290,7 +290,6 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional <span id="connBadge" class="conn-badge conn-local">💾 Guardado local</span></h1>
-      <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como superior principal; mantené <strong>Shift</strong> y repetí con cada superior adicional (sin límite: podés sumarle 2, 3 o más). Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <div class="search-box">
@@ -313,15 +312,6 @@
       <button class="btn btn-primary" id="btnAddRoot">+ Agregar cargo</button>
     </div>
   </header>
-
-  <div class="legend" id="legend"></div>
-  <div class="legend" id="filterBar" style="border-top:none; padding-top:0;">
-    <div class="filter-group" id="filterGroup">
-      <button data-filter="all" class="active">Todos</button>
-      <button data-filter="gestion">● Gestión</button>
-      <button data-filter="pedagogico">● Pedagógico</button>
-    </div>
-  </div>
 
   <div id="focusBanner" class="focus-banner" style="display:none;">
     <span id="focusBannerText"></span>
@@ -475,12 +465,10 @@ let editingId = null;
 let dragState = null;
 let linkState = null;
 let teamDragState = null;
-let currentFilter = 'all';
 let focusedTeam = null;
 let searchQuery = '';
 function isDimmed(node){
-  if(focusedTeam) return !((node.teams||[]).includes(focusedTeam));
-  return currentFilter !== 'all' && node.area !== currentFilter;
+  return focusedTeam ? !((node.teams||[]).includes(focusedTeam)) : false;
 }
 
 function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
@@ -515,13 +503,53 @@ function effectiveLevel(id){
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 function autoLayout(){
+  // Anything pinned (a person or a whole team) keeps its x,y — but the cursor
+  // used to just ignore where those pinned things actually sit, so a freshly
+  // laid-out branch could land right under a pinned team's box. Now it treats
+  // pinned spots as reserved zones and jumps past them.
+  const BOX_MARGIN = 70; // extra room between different teams' boxes (padding + label text)
+  const reserved = [];
+  state.nodes.forEach(n => {
+    const hTeam = (n.teams||[])[0];
+    const locked = n.pinned || (hTeam && isTeamPinned(hTeam));
+    if(locked && typeof n.x === 'number'){
+      const pad = hTeam ? BOX_MARGIN : 20;
+      reserved.push([n.x - pad, n.x + CARD_W + pad]);
+    }
+  });
+  reserved.sort((a,b) => a[0] - b[0]);
+  const merged = [];
+  reserved.forEach(r => {
+    if(merged.length && r[0] <= merged[merged.length-1][1]) merged[merged.length-1][1] = Math.max(merged[merged.length-1][1], r[1]);
+    else merged.push([...r]);
+  });
+  function advancePastReserved(x){
+    let moved = true;
+    while(moved){
+      moved = false;
+      for(const [lo, hi] of merged){
+        if(x >= lo - CARD_GAP_X && x <= hi){ x = hi + CARD_GAP_X; moved = true; }
+      }
+    }
+    return x;
+  }
+
   let cursor = START_X;
   // At every level, siblings that share a home team get placed next to each
   // other (in first-appearance order), so a team's box never has to stretch
   // around an unrelated sibling sitting in between. Siblings without a team
   // keep their normal relative order.
   function orderedChildren(pid){
-    const kids = childrenOf(pid);
+    // A hidden (collapsed, non-leader) member reserves NO layout space at
+    // all — the visible leader represents the whole team with just one slot.
+    // This is what stops "Reacomodar" from leaving a big empty gap for a
+    // team that's currently closed.
+    const kids = childrenOf(pid).filter(k => {
+      const hTeam = (k.teams||[])[0];
+      if(!hTeam || !isCollapsed(hTeam)) return true;
+      const leader = teamLeader(homeMembersOf(hTeam));
+      return leader && leader.id === k.id;
+    });
     const groups = new Map();
     const order = [];
     kids.forEach(k => {
@@ -538,9 +566,17 @@ function autoLayout(){
     const locked = node.pinned || (homeTeam && isTeamPinned(homeTeam));
     if(!kids.length){
       if(locked){ return; } // stays exactly where it was pinned
-      node.x = cursor; cursor += CARD_W + CARD_GAP_X;
+      cursor = advancePastReserved(cursor);
+      node.x = cursor;
+      cursor += CARD_W + CARD_GAP_X;
     } else {
-      kids.forEach(place);
+      let prevKey = null;
+      kids.forEach(k => {
+        const key = (k.teams||[])[0] || ('__solo_' + k.id);
+        if(prevKey !== null && key !== prevKey) cursor += BOX_MARGIN; // breathing room between different teams
+        prevKey = key;
+        place(k);
+      });
       if(locked){ return; }
       node.x = (kids[0].x + kids[kids.length-1].x) / 2;
     }
@@ -677,7 +713,6 @@ function render(){
         <button class="btn btn-primary" id="emptyAdd">+ Agregar el primer cargo</button>
       </div>`;
     document.getElementById('emptyAdd').addEventListener('click', () => openModal(null, null));
-    renderLegend();
     return;
   }
 
@@ -758,14 +793,13 @@ function render(){
       state.nodes.push(copy);
       await saveState();
       render();
-      toast('Cargo duplicado. Podés renombrarlo y lo donde quieras.');
+      toast('Cargo duplicado. Podés renombrarlo y arrastrarlo donde quieras.');
     });
   });
 
   updateCanvasSize();
   renderTeamBoxes();
   drawLinks();
-  renderLegend();
 }
 
 const TEAM_COLORS = ['#C0932B','#3E7C74','#B85C38','#6B4E71','#6E7F52','#3F6E9E'];
@@ -977,7 +1011,17 @@ function renderTeamBoxes(){
       const orient = btn.getAttribute('data-orient');
       const team = btn.getAttribute('data-team');
       if(orient === 'hierarchy'){ arrangeTeamHierarchy(team); await saveState(); render(); }
-      else if(orient === 'collapse'){ toggleCollapsed(team); await saveState(); render(); }
+      else if(orient === 'collapse'){
+        const wasCollapsed = isCollapsed(team);
+        toggleCollapsed(team);
+        if(wasCollapsed){
+          // just expanded: give the team its real width back and route
+          // everything else around it, instead of leaving it to overlap
+          autoLayout();
+        }
+        await saveState();
+        render();
+      }
       else if(orient === 'export'){ await exportTeamPng(team); }
       else if(orient === 'pin'){
         toggleTeamPinned(team);
@@ -996,39 +1040,6 @@ function renderTeamBoxes(){
       }
       else { arrangeTeam(team, orient); await saveState(); render(); }
     });
-  });
-}
-
-function renderLegend(){
-  const depths = [...new Set(state.nodes.map(n => effectiveLevel(n.id)))].sort((a,b)=>a-b);
-  const legend = document.getElementById('legend');
-  const hasSecondary = state.nodes.some(n => (n.secondaryParentIds||[]).length);
-  const hasArea = state.nodes.some(n => n.area);
-  if(!depths.length){
-    legend.innerHTML = `<span class="legend-empty">Los niveles aparecen automáticamente a medida que agregás cargos.</span>`;
-    return;
-  }
-  let html = depths.map(d => {
-    const label = state.levelNames[d] || `Nivel ${d+1}`;
-    return `<div class="legend-item">
-      <span class="legend-dot" style="background:${colorVar(d)}"></span>
-      <span contenteditable="true" data-depth="${d}" class="level-label">${escapeHtml(label)}</span>
-    </div>`;
-  }).join('');
-  if(hasArea){
-    html += `<div class="legend-item" style="border-left:1px solid var(--line); padding-left:16px;">
-      <span class="badge badge-gestion" style="margin-top:0;">Gestión</span>
-      <span class="badge badge-pedagogico" style="margin-top:0;">Pedagógico</span>
-    </div>`;
-  }
-  legend.innerHTML = html;
-  legend.querySelectorAll('.level-label').forEach(el => {
-    el.addEventListener('blur', async () => {
-      const d = el.getAttribute('data-depth');
-      state.levelNames[d] = el.textContent.trim() || `Nivel ${parseInt(d)+1}`;
-      await saveState();
-    });
-    el.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); el.blur(); } });
   });
 }
 
@@ -1653,6 +1664,7 @@ function runSearch(){
       expanded = true;
     }
   });
+  if(expanded) autoLayout();
   render();
   requestAnimationFrame(() => {
     const first = document.querySelector(`.card-wrap[data-id="${matches[0].id}"]`);
@@ -1676,15 +1688,6 @@ document.getElementById('btnReset').addEventListener('click', async () => {
   if(!confirm('Esto borra todo el organigrama actual. ¿Continuar?')) return;
   state = { nodes: [], levelNames: {}, collapsedTeams: [], pinnedTeams: [], teamLeaderNames: {} };
   await saveState();
-  render();
-});
-
-/* ---------- filter ---------- */
-document.getElementById('filterGroup').addEventListener('click', e => {
-  const btn = e.target.closest('button[data-filter]');
-  if(!btn) return;
-  currentFilter = btn.getAttribute('data-filter');
-  document.querySelectorAll('#filterGroup button').forEach(b => b.classList.toggle('active', b === btn));
   render();
 });
 
@@ -1754,21 +1757,19 @@ document.getElementById('btnExportPng').addEventListener('click', async () => {
   if(!state.nodes.length){ toast('No hay nada para descargar todavía.'); return; }
   toast('Generando imagen…');
   try{
-    const legendCanvas = await html2canvas(document.getElementById('legend'), { backgroundColor: '#FFFFFF', scale: 2 });
     const chartCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale: 2 });
-    const titleHeight = 100;
-    const width = Math.max(legendCanvas.width, chartCanvas.width, 900);
+    const titleHeight = 80;
+    const width = Math.max(chartCanvas.width, 900);
     const combined = document.createElement('canvas');
     combined.width = width;
-    combined.height = titleHeight + legendCanvas.height + chartCanvas.height;
+    combined.height = titleHeight + chartCanvas.height;
     const ctx = combined.getContext('2d');
     ctx.fillStyle = '#F6F3EC';
     ctx.fillRect(0, 0, combined.width, combined.height);
     ctx.fillStyle = '#22314F';
     ctx.font = '600 40px Georgia, serif';
-    ctx.fillText('Organigrama Institucional', 28, 58);
-    ctx.drawImage(legendCanvas, 0, titleHeight);
-    ctx.drawImage(chartCanvas, 0, titleHeight + legendCanvas.height);
+    ctx.fillText('Organigrama Institucional', 28, 52);
+    ctx.drawImage(chartCanvas, 0, titleHeight);
 
     const link = document.createElement('a');
     link.download = 'organigrama-institucional.png';
