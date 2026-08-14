@@ -72,9 +72,14 @@
   .team-label{
     position:absolute; top:-13px; left:16px; background:var(--paper); padding:2px 10px;
     border-radius:6px; font-size:11px; font-weight:700; letter-spacing:.03em; white-space:nowrap;
-    cursor:pointer;
   }
-  .team-label:hover{ text-decoration:underline; }
+  .team-name-click{ cursor:pointer; }
+  .team-name-click:hover{ text-decoration:underline; }
+  .team-leader-edit{
+    cursor:text; border-bottom:1px dashed transparent; outline:none; font-weight:600;
+  }
+  .team-leader-edit:hover{ border-bottom-color:currentColor; }
+  .team-leader-edit:focus{ border-bottom-color:currentColor; background:rgba(0,0,0,.04); border-radius:3px; padding:0 2px; }
   .team-box.dimmed-box{ opacity:.07; pointer-events:none; }
   .team-box.focused-box{ border-width:3px; z-index:1; }
   .team-box.team-pinned{ border-style:solid; cursor:default; }
@@ -458,7 +463,7 @@ function subscribeRealtime(){
 const COLORS = ['c0','c1','c2','c3','c4','c5'];
 const CARD_W = 190, CARD_GAP_X = 30, LEVEL_H = 150, START_X = 50, START_Y = 40;
 
-let state = { nodes: [], levelNames: {}, collapsedTeams: [], pinnedTeams: [] };
+let state = { nodes: [], levelNames: {}, collapsedTeams: [], pinnedTeams: [], teamLeaderNames: {} };
 let editingId = null;
 let dragState = null;
 let linkState = null;
@@ -576,6 +581,7 @@ function migrateState(){
   });
   if(!Array.isArray(state.collapsedTeams)) state.collapsedTeams = [];
   if(!Array.isArray(state.pinnedTeams)) state.pinnedTeams = [];
+  if(!state.teamLeaderNames || typeof state.teamLeaderNames !== 'object') state.teamLeaderNames = {};
   if(state.nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number')) autoLayout();
 }
 
@@ -905,11 +911,14 @@ function renderTeamBoxes(){
     const collapsed = isCollapsed(team);
     const pinned = isTeamPinned(team);
     const hiddenCount = collapsed ? allMembers.length - 1 : 0;
-    const leaderTag = (leader && allMembers.length > 1) ? ` · Líder: ${escapeHtml(leader.name)}` : '';
+    const autoLeaderName = leader ? leader.name : '';
+    const leaderOverride = (state.teamLeaderNames||{})[team];
+    const displayLeaderName = (leaderOverride !== undefined && leaderOverride !== '') ? leaderOverride : autoLeaderName;
+    const showLeader = allMembers.length > 1 && displayLeaderName;
     const countTag = hiddenCount > 0 ? ` · +${hiddenCount} más` : '';
     const boxClass = (focusedTeam ? (focusedTeam === team ? ' focused-box' : ' dimmed-box') : '') + (pinned ? ' team-pinned' : '');
     html += `<div class="team-box${boxClass}" data-team="${escapeHtml(team)}" style="left:${minX}px; top:${minY}px; width:${maxX-minX}px; height:${maxY-minY}px; border-color:${color};">
-      <div class="team-label" style="color:${color}; border:1px solid ${color};" title="Tocá para ver solo el organigrama de este equipo">${pinned ? '📌 ' : ''}${escapeHtml(team)}${leaderTag}${countTag}</div>
+      <div class="team-label" style="color:${color}; border:1px solid ${color};">${pinned ? '📌 ' : ''}<span class="team-name-click" data-team="${escapeHtml(team)}" title="Tocá para ver solo el organigrama de este equipo">${escapeHtml(team)}</span>${showLeader ? ` · Líder: <span class="team-leader-edit" contenteditable="true" spellcheck="false" data-team="${escapeHtml(team)}" title="Editá el nombre que se muestra como líder">${escapeHtml(displayLeaderName)}</span>` : ''}${countTag}</div>
       ${allMembers.length > 1 ? `
       <div class="team-controls">
         ${!collapsed && !pinned ? `
@@ -923,10 +932,10 @@ function renderTeamBoxes(){
     </div>`;
   });
   layer.innerHTML = html;
-  layer.querySelectorAll('.team-label').forEach(lbl => {
-    lbl.addEventListener('click', e => {
+  layer.querySelectorAll('.team-name-click').forEach(el => {
+    el.addEventListener('click', e => {
       e.stopPropagation();
-      const team = lbl.closest('.team-box').getAttribute('data-team');
+      const team = el.getAttribute('data-team');
       focusedTeam = (focusedTeam === team) ? null : team;
       render();
       if(focusedTeam){
@@ -935,6 +944,21 @@ function renderTeamBoxes(){
           if(b) b.scrollIntoView({ behavior:'smooth', block:'center', inline:'center' });
         });
       }
+    });
+  });
+  layer.querySelectorAll('.team-leader-edit').forEach(el => {
+    el.addEventListener('click', e => e.stopPropagation());
+    el.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); el.blur(); } });
+    el.addEventListener('blur', async () => {
+      const team = el.getAttribute('data-team');
+      const text = el.textContent.trim();
+      const leaderNow = teamLeader(homeMembersOf(team));
+      const autoName = leaderNow ? leaderNow.name : '';
+      state.teamLeaderNames = state.teamLeaderNames || {};
+      if(!text || text === autoName) delete state.teamLeaderNames[team];
+      else state.teamLeaderNames[team] = text;
+      await saveState();
+      render();
     });
   });
   layer.querySelectorAll('.team-arrange-btn').forEach(btn => {
@@ -1592,7 +1616,7 @@ document.getElementById('btnArrange').addEventListener('click', async () => {
 });
 document.getElementById('btnReset').addEventListener('click', async () => {
   if(!confirm('Esto borra todo el organigrama actual. ¿Continuar?')) return;
-  state = { nodes: [], levelNames: {}, collapsedTeams: [], pinnedTeams: [] };
+  state = { nodes: [], levelNames: {}, collapsedTeams: [], pinnedTeams: [], teamLeaderNames: {} };
   await saveState();
   render();
 });
