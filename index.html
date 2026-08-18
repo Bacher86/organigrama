@@ -163,7 +163,7 @@
   .modal-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:18px; gap:8px; }
   .modal-actions .right{ display:flex; gap:8px; }
 
-  .profile-modal{ width:400px; }
+  .profile-modal{ width:430px; }
   .profile-header{ display:flex; align-items:flex-start; gap:10px; margin-bottom:4px; }
   .profile-header .bar{ width:5px; align-self:stretch; border-radius:3px; flex:none; min-height:38px; }
   .profile-name{ font-family:'Fraunces', serif; font-weight:700; font-size:19px; line-height:1.25; }
@@ -190,6 +190,19 @@
   }
   .profile-empty{ font-size:13px; color:var(--ink-soft); font-style:italic; }
   .profile-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+  .profile-edit-block{
+    border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:10px; background:#FBFAF7;
+  }
+  .profile-edit-block .mini-fields-row{ margin-bottom:7px; }
+  .profile-edit-block .mini-fields-row input{
+    padding:7px 8px; border-radius:6px; border:1px solid var(--line); font-size:12.5px;
+    background:var(--paper); color:var(--ink); font-family:'IBM Plex Sans', sans-serif;
+  }
+  .profile-edit-block textarea.pf-tasks{
+    width:100%; padding:7px 8px; border-radius:6px; border:1px solid var(--line); font-size:12.5px;
+    background:var(--paper); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; resize:vertical; min-height:56px;
+  }
+  .profile-cargo-label{ font-size:11.5px; font-weight:700; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:.03em; }
 
   .dropdown{ position:relative; }
   .dropdown-menu{
@@ -256,6 +269,8 @@
     resize:vertical; min-height:70px;
   }
   .field textarea:focus{ outline:2px solid var(--ring); outline-offset:1px; }
+  .mini-fields-row{ display:flex; gap:8px; margin-bottom:8px; }
+  .mini-fields-row input{ flex:1; min-width:0; }
 
   .search-box{ position:relative; display:flex; align-items:center; }
   .search-box input{
@@ -290,6 +305,7 @@
   <header>
     <div class="title-block">
       <h1>Organigrama Institucional <span id="connBadge" class="conn-badge conn-local">💾 Guardado local</span></h1>
+      <p>Arrastrá una tarjeta para moverla, o editala para ponerle un <strong>Nivel jerárquico</strong> manual (1 = el más alto). Arrastrá desde el punto ⇓ para vincular como superior principal; mantené <strong>Shift</strong> y repetí con cada superior adicional (sin límite: podés sumarle 2, 3 o más). Etiquetá el equipo/rama de cada cargo (el primero que le pongas es el principal) para que se vea como un sub-organigrama propio, con su líder arriba. Clic en una línea para quitarla.</p>
     </div>
     <div class="header-actions">
       <div class="search-box">
@@ -368,6 +384,17 @@
         <label for="fBulk">¿Son varios cargos del mismo nivel? Cargalos juntos</label>
         <textarea id="fBulk" placeholder="Un nombre por línea, por ejemplo:&#10;Director de Área 1&#10;Director de Área 2&#10;Director de Área 3"></textarea>
         <div class="field-note">Si completás esto, se ignora el campo "Nombre del cargo" de arriba y se crea un cargo por cada línea, todos al mismo nivel y con la misma Área.</div>
+      </div>
+      <div class="field">
+        <label>Datos adicionales (opcional — útil para docentes)</label>
+        <div class="mini-fields-row">
+          <input id="fStartYear" type="text" placeholder="Año de ingreso">
+          <input id="fSubject" type="text" placeholder="Materia">
+        </div>
+        <div class="mini-fields-row">
+          <input id="fCourses" type="text" placeholder="Cursos / grados">
+          <input id="fSchedule" type="text" placeholder="Horario">
+        </div>
       </div>
       <div class="field">
         <label for="fTasks">Tareas / responsabilidades (opcional, una por línea)</label>
@@ -620,6 +647,10 @@ function migrateState(){
     if(n.role2 === undefined) n.role2 = null;
     if(n.pinned === undefined) n.pinned = false;
     if(n.tasks === undefined) n.tasks = null;
+    if(n.startYear === undefined) n.startYear = null;
+    if(n.subject === undefined) n.subject = null;
+    if(n.courses === undefined) n.courses = null;
+    if(n.schedule === undefined) n.schedule = null;
     delete n.team;
   });
   if(!Array.isArray(state.collapsedTeams)) state.collapsedTeams = [];
@@ -1054,6 +1085,44 @@ function updateCanvasSize(){
   content.style.height = maxY + 'px';
 }
 
+// The canvas element is always sized generously so there's room to drag
+// things around, but that leaves a lot of empty margin. This finds the
+// actual bounding box of what's on screen (cards + team boxes), so exports
+// can be cropped to just that instead of the whole oversized canvas.
+function getContentBounds(){
+  const content = document.getElementById('canvasContent');
+  const wraps = [...content.querySelectorAll('.card-wrap')];
+  if(!wraps.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  wraps.forEach(w => {
+    minX = Math.min(minX, w.offsetLeft);
+    minY = Math.min(minY, w.offsetTop);
+    maxX = Math.max(maxX, w.offsetLeft + w.offsetWidth);
+    maxY = Math.max(maxY, w.offsetTop + w.offsetHeight);
+  });
+  content.querySelectorAll('.team-box').forEach(b => {
+    minX = Math.min(minX, b.offsetLeft);
+    minY = Math.min(minY, b.offsetTop - 14);
+    maxX = Math.max(maxX, b.offsetLeft + b.offsetWidth);
+    maxY = Math.max(maxY, b.offsetTop + b.offsetHeight);
+  });
+  const PAD = 24;
+  return {
+    x: Math.max(0, minX - PAD),
+    y: Math.max(0, minY - PAD),
+    width: (maxX - minX) + PAD * 2,
+    height: (maxY - minY) + PAD * 2
+  };
+}
+function cropCanvas(fullCanvas, bounds, scale){
+  const sx = Math.round(bounds.x * scale), sy = Math.round(bounds.y * scale);
+  const sw = Math.round(bounds.width * scale), sh = Math.round(bounds.height * scale);
+  const cropped = document.createElement('canvas');
+  cropped.width = sw; cropped.height = sh;
+  cropped.getContext('2d').drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  return cropped;
+}
+
 function drawLinks(){
   const svg = document.getElementById('linksSvg');
   const content = document.getElementById('canvasContent');
@@ -1445,6 +1514,10 @@ function openModal(nodeId, parentPreset){
     roleInput.value = node.role || '';
     document.getElementById('fRole2').value = node.role2 || '';
     document.getElementById('fTasks').value = node.tasks || '';
+    document.getElementById('fStartYear').value = node.startYear || '';
+    document.getElementById('fSubject').value = node.subject || '';
+    document.getElementById('fCourses').value = node.courses || '';
+    document.getElementById('fSchedule').value = node.schedule || '';
     populateParentSelect(nodeId);
     document.getElementById('fParent').value = node.parentId || '';
     delBtn.style.display = 'inline-flex';
@@ -1458,6 +1531,10 @@ function openModal(nodeId, parentPreset){
     roleInput.value = '';
     document.getElementById('fRole2').value = '';
     document.getElementById('fTasks').value = '';
+    document.getElementById('fStartYear').value = '';
+    document.getElementById('fSubject').value = '';
+    document.getElementById('fCourses').value = '';
+    document.getElementById('fSchedule').value = '';
     populateParentSelect(null);
     document.getElementById('fParent').value = parentPreset || '';
     delBtn.style.display = 'none';
@@ -1506,14 +1583,6 @@ function openProfile(nodeId){
     });
   });
 
-  // tasks combined across every cargo, labelled by cargo when merged
-  const taskItems = [];
-  personNodes.forEach(pn => {
-    (pn.tasks || '').split('\n').map(t => t.trim()).filter(Boolean).forEach(t => taskItems.push({ text: t, cargo: pn.name }));
-  });
-  const tasksHtml = taskItems.length
-    ? `<ul class="profile-tasks">${taskItems.map(t => `<li>${escapeHtml(t.text)}${isMerged ? ` <span style="color:var(--ink-soft); font-weight:400;">— ${escapeHtml(t.cargo)}</span>` : ''}</li>`).join('')}</ul>`
-    : `<div class="profile-empty">Todavía no se cargaron tareas.</div>`;
 
   // superiors combined across every cargo, deduped by person
   const superiorMap = new Map();
@@ -1542,6 +1611,22 @@ function openProfile(nodeId){
     return `<span class="mini-team-chip" style="border-color:${colorVar(d)}; color:${colorVar(d)};">${escapeHtml(pn.name)}</span>`;
   }).join(' ');
 
+  // datos adicionales (año/materia/cursos/horario) + tareas, editables ahí mismo
+  const editBlocksHtml = personNodes.map(pn => `
+    <div class="profile-edit-block" data-node="${pn.id}">
+      ${isMerged ? `<div class="profile-cargo-label">${escapeHtml(pn.name)}</div>` : ''}
+      <div class="mini-fields-row">
+        <input type="text" class="pf-startYear" placeholder="Año de ingreso" value="${escapeHtml(pn.startYear || '')}">
+        <input type="text" class="pf-subject" placeholder="Materia" value="${escapeHtml(pn.subject || '')}">
+      </div>
+      <div class="mini-fields-row">
+        <input type="text" class="pf-courses" placeholder="Cursos / grados" value="${escapeHtml(pn.courses || '')}">
+        <input type="text" class="pf-schedule" placeholder="Horario" value="${escapeHtml(pn.schedule || '')}">
+      </div>
+      <textarea class="pf-tasks" placeholder="Tareas, una por línea">${escapeHtml(pn.tasks || '')}</textarea>
+    </div>
+  `).join('');
+
   document.getElementById('profileModalContent').innerHTML = `
     <div class="profile-header">
       <div class="bar" style="background:${colorVar(effectiveLevel(node.id))};"></div>
@@ -1565,12 +1650,13 @@ function openProfile(nodeId){
       ${subsHtml}
     </div>
     <div class="profile-section">
-      <h4>Tareas / responsabilidades</h4>
-      ${tasksHtml}
+      <h4>Datos y tareas <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--ink-soft);">(editable acá mismo)</span></h4>
+      ${editBlocksHtml}
+      <button type="button" class="btn btn-primary" id="btnSaveProfileFields" style="margin-top:4px;">Guardar cambios</button>
     </div>
     <div class="profile-actions">
       <button type="button" class="btn btn-ghost" id="btnCloseProfile">Cerrar</button>
-      <button type="button" class="btn btn-primary" id="btnEditFromProfile">Editar cargo</button>
+      <button type="button" class="btn btn-ghost" id="btnEditFromProfile">Editar cargo completo</button>
     </div>
   `;
   document.getElementById('profileOverlay').classList.add('open');
@@ -1578,6 +1664,19 @@ function openProfile(nodeId){
   document.getElementById('btnEditFromProfile').addEventListener('click', () => {
     closeProfile();
     openModal(nodeId, null);
+  });
+  document.getElementById('btnSaveProfileFields').addEventListener('click', async () => {
+    document.querySelectorAll('.profile-edit-block').forEach(block => {
+      const pn = nodeById(block.getAttribute('data-node'));
+      if(!pn) return;
+      pn.startYear = block.querySelector('.pf-startYear').value.trim() || null;
+      pn.subject = block.querySelector('.pf-subject').value.trim() || null;
+      pn.courses = block.querySelector('.pf-courses').value.trim() || null;
+      pn.schedule = block.querySelector('.pf-schedule').value.trim() || null;
+      pn.tasks = block.querySelector('.pf-tasks').value.trim() || null;
+    });
+    await saveState();
+    toast('Cambios guardados.');
   });
 }
 function closeProfile(){ document.getElementById('profileOverlay').classList.remove('open'); }
@@ -1591,6 +1690,10 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
   const role = document.getElementById('fRole').value.trim();
   const role2 = document.getElementById('fRole2').value.trim();
   const tasks = document.getElementById('fTasks').value.trim() || null;
+  const startYear = document.getElementById('fStartYear').value.trim() || null;
+  const subject = document.getElementById('fSubject').value.trim() || null;
+  const courses = document.getElementById('fCourses').value.trim() || null;
+  const schedule = document.getElementById('fSchedule').value.trim() || null;
   const parentId = document.getElementById('fParent').value || null;
   const secondaryParentIds = Array.from(document.querySelectorAll('#secondaryList input:checked')).map(i => i.value);
   const area = document.querySelector('input[name="fArea"]:checked').value || null;
@@ -1607,17 +1710,17 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
     if(!name){ toast('Poné un nombre para el cargo.'); return; }
     node.name = name; node.role = role; node.role2 = role2 || null; node.parentId = parentId;
     node.secondaryParentIds = secondaryParentIds; node.area = area; node.teams = teams; node.rank = rank;
-    node.tasks = tasks;
+    node.tasks = tasks; node.startYear = startYear; node.subject = subject; node.courses = courses; node.schedule = schedule;
   } else if(bulkNames.length){
     bulkNames.forEach(n => {
       const pos = newNodePosition(parentId);
-      state.nodes.push({ id: uid(), name: n, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks, pinned: false, x: pos.x, y: pos.y });
+      state.nodes.push({ id: uid(), name: n, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks, startYear, subject, courses, schedule, pinned: false, x: pos.x, y: pos.y });
     });
     toast(`${bulkNames.length} cargos agregados, todos al mismo nivel.`);
   } else {
     if(!name){ toast('Poné un nombre, o usá el campo de varios cargos.'); return; }
     const pos = newNodePosition(parentId);
-    state.nodes.push({ id: uid(), name, role, role2: role2 || null, parentId, secondaryParentIds, area, teams, rank, tasks, pinned: false, x: pos.x, y: pos.y });
+    state.nodes.push({ id: uid(), name, role, role2: role2 || null, parentId, secondaryParentIds, area, teams, rank, tasks, startYear, subject, courses, schedule, pinned: false, x: pos.x, y: pos.y });
   }
   teams.forEach(t => compactTeamIfScattered(t));
   await saveState();
@@ -1713,16 +1816,36 @@ document.getElementById('btnExportJson').addEventListener('click', () => {
 
 async function exportTeamPng(team){
   const wasCollapsed = isCollapsed(team);
+  let savedPositions = null;
   if(wasCollapsed){
+    savedPositions = state.nodes.map(n => ({ id: n.id, x: n.x, y: n.y }));
     state.collapsedTeams = state.collapsedTeams.filter(t => t !== team);
+    autoLayout(); // give the team its real space back so nothing overlaps in the shot
     render();
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   }
   const box = document.querySelector(`.team-box[data-team="${CSS.escape(team)}"]`);
-  if(!box){ toast('No se encontró el recuadro de ese equipo.'); return; }
+  if(!box){
+    toast('No se encontró el recuadro de ese equipo.');
+    if(wasCollapsed){ state.collapsedTeams.push(team); render(); }
+    return;
+  }
   toast(`Generando imagen de "${team}"…`);
   try{
-    const boxCanvas = await html2canvas(box, { backgroundColor: '#F6F3EC', scale: 2 });
+    const scale = 2;
+    // The team-box is just a decorative outline — the actual cards live as
+    // separate elements in the canvas. Capture the whole canvas, then crop
+    // to this box's region, so the people inside actually show up.
+    const fullCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale });
+    const PAD = 16;
+    const bounds = {
+      x: Math.max(0, box.offsetLeft - PAD),
+      y: Math.max(0, box.offsetTop - PAD - 14),
+      width: box.offsetWidth + PAD * 2,
+      height: box.offsetHeight + PAD * 2 + 14
+    };
+    const boxCanvas = cropCanvas(fullCanvas, bounds, scale);
+
     const titleHeight = 70;
     const combined = document.createElement('canvas');
     combined.width = boxCanvas.width;
@@ -1746,6 +1869,7 @@ async function exportTeamPng(team){
   }finally{
     if(wasCollapsed){
       state.collapsedTeams.push(team);
+      if(savedPositions) savedPositions.forEach(p => { const n = nodeById(p.id); if(n){ n.x = p.x; n.y = p.y; } });
       await saveState();
       render();
     }
@@ -1757,7 +1881,10 @@ document.getElementById('btnExportPng').addEventListener('click', async () => {
   if(!state.nodes.length){ toast('No hay nada para descargar todavía.'); return; }
   toast('Generando imagen…');
   try{
-    const chartCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale: 2 });
+    const scale = 2;
+    const fullCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale });
+    const bounds = getContentBounds();
+    const chartCanvas = bounds ? cropCanvas(fullCanvas, bounds, scale) : fullCanvas;
     const titleHeight = 80;
     const width = Math.max(chartCanvas.width, 900);
     const combined = document.createElement('canvas');
@@ -1787,7 +1914,10 @@ document.getElementById('btnExportJpg').addEventListener('click', async () => {
   if(!state.nodes.length){ toast('No hay nada para descargar todavía.'); return; }
   toast('Generando imagen…');
   try{
-    const chartCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale: 2 });
+    const scale = 2;
+    const fullCanvas = await html2canvas(document.getElementById('canvasContent'), { backgroundColor: '#F6F3EC', scale });
+    const bounds = getContentBounds();
+    const chartCanvas = bounds ? cropCanvas(fullCanvas, bounds, scale) : fullCanvas;
     const link = document.createElement('a');
     link.download = 'organigrama-institucional.jpg';
     link.href = chartCanvas.toDataURL('image/jpeg', 0.92);
