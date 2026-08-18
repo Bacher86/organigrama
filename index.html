@@ -325,6 +325,7 @@
         </div>
       </div>
       <button class="btn btn-ghost" id="btnReset">Reiniciar</button>
+      <button class="btn btn-ghost" id="btnOpenTeacher">🍎 Agregar docentes</button>
       <button class="btn btn-primary" id="btnAddRoot">+ Agregar cargo</button>
     </div>
   </header>
@@ -382,8 +383,8 @@
       </div>
       <div class="field" id="bulkField">
         <label for="fBulk">¿Son varios cargos del mismo nivel? Cargalos juntos</label>
-        <textarea id="fBulk" placeholder="Un nombre por línea, por ejemplo:&#10;Director de Área 1&#10;Director de Área 2&#10;Director de Área 3"></textarea>
-        <div class="field-note">Si completás esto, se ignora el campo "Nombre del cargo" de arriba y se crea un cargo por cada línea, todos al mismo nivel y con la misma Área.</div>
+        <textarea id="fBulk" placeholder="Un nombre por línea:&#10;Director de Área 1&#10;Director de Área 2&#10;&#10;— o para docentes, separá con | :&#10;Juan Pérez | 2018 | 3ºA, 3ºB | Matemática&#10;María López | 2020 | 1ºA | Lengua"></textarea>
+        <div class="field-note">Un nombre por línea crea cargos simples, todos al mismo nivel. Para docentes con datos completos, separá cada línea con <strong>|</strong> en este orden: <strong>Nombre y Apellido | Año de ingreso | Cursos | Materia</strong> — arma el cargo, la persona y esos datos, todo junto.</div>
       </div>
       <div class="field">
         <label>Datos adicionales (opcional — útil para docentes)</label>
@@ -423,6 +424,46 @@
 
 <div class="overlay" id="profileOverlay">
   <div class="modal profile-modal" id="profileModalContent"></div>
+</div>
+
+<div class="overlay" id="teacherOverlay">
+  <div class="modal" style="width:430px;">
+    <h3>Agregar docentes</h3>
+    <div class="field">
+      <label for="qtParent">Depende de</label>
+      <select id="qtParent"></select>
+    </div>
+    <div class="field">
+      <label for="qtTeam">Equipo (opcional)</label>
+      <input id="qtTeam" type="text" list="teamOptions" placeholder="Ej: Docentes">
+      <div class="field-note">Se completa una sola vez — se mantiene para todos los que cargues a continuación.</div>
+    </div>
+    <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
+    <div class="mini-fields-row">
+      <input id="qtNombre" type="text" placeholder="Nombre">
+      <input id="qtApellido" type="text" placeholder="Apellido">
+    </div>
+    <div class="mini-fields-row">
+      <input id="qtAnio" type="text" placeholder="Año de ingreso">
+      <input id="qtCurso" type="text" placeholder="Curso actual">
+    </div>
+    <div class="mini-fields-row">
+      <input id="qtHorario" type="text" placeholder="Horario">
+      <input id="qtMateria" type="text" placeholder="Materia">
+    </div>
+    <button type="button" class="btn btn-primary" id="btnAddTeacherRow" style="width:100%; margin-top:4px;">+ Cargar docente</button>
+
+    <div class="field" style="margin-top:18px;">
+      <label>Docentes cargados ahora (<span id="qtCount">0</span>)</label>
+      <div class="sub-list" id="qtList"><div class="sub-list-empty">Todavía no cargaste ninguno.</div></div>
+    </div>
+    <div class="modal-actions">
+      <div></div>
+      <div class="right">
+        <button type="button" class="btn btn-primary" id="btnCloseTeacherModal">Listo, cerrar</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -1682,6 +1723,107 @@ function openProfile(nodeId){
 function closeProfile(){ document.getElementById('profileOverlay').classList.remove('open'); }
 document.getElementById('profileOverlay').addEventListener('click', e => { if(e.target.id === 'profileOverlay') closeProfile(); });
 
+/* ---------- quick teacher entry ---------- */
+let teacherBatch = []; // ids added in this modal session, for the running list
+
+function fillGenericParentSelect(selectEl){
+  const options = ['<option value="">— Nivel superior (raíz) —</option>'];
+  state.nodes.forEach(n => {
+    options.push(`<option value="${n.id}">${'—'.repeat(depthOf(n.id))} ${escapeHtml(n.name)}</option>`);
+  });
+  selectEl.innerHTML = options.join('');
+}
+
+function renderTeacherList(){
+  const box = document.getElementById('qtList');
+  document.getElementById('qtCount').textContent = teacherBatch.length;
+  if(!teacherBatch.length){
+    box.innerHTML = `<div class="sub-list-empty">Todavía no cargaste ninguno.</div>`;
+    return;
+  }
+  box.innerHTML = teacherBatch.map(id => {
+    const n = nodeById(id);
+    if(!n) return '';
+    const detail = [n.subject, n.courses].filter(Boolean).join(' — ');
+    return `<label style="justify-content:space-between;">
+      <span>${escapeHtml(n.role || '(sin nombre)')}${detail ? ` <span style="color:var(--ink-soft); font-weight:400;">(${escapeHtml(detail)})</span>` : ''}</span>
+      <button type="button" class="icon-btn" data-remove-teacher="${n.id}" title="Sacar de la lista">✕</button>
+    </label>`;
+  }).join('');
+  box.querySelectorAll('[data-remove-teacher]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const id = b.getAttribute('data-remove-teacher');
+      state.nodes = state.nodes.filter(n => n.id !== id);
+      teacherBatch = teacherBatch.filter(tid => tid !== id);
+      await saveState();
+      render();
+      renderTeacherList();
+      toast('Docente sacado de la lista.');
+    });
+  });
+}
+
+function clearTeacherFields(){
+  ['qtNombre','qtApellido','qtAnio','qtCurso','qtHorario','qtMateria'].forEach(id => document.getElementById(id).value = '');
+}
+
+document.getElementById('btnOpenTeacher').addEventListener('click', () => {
+  teacherBatch = [];
+  renderTeacherList();
+  fillGenericParentSelect(document.getElementById('qtParent'));
+  populateTeamOptions();
+  document.getElementById('qtTeam').value = '';
+  clearTeacherFields();
+  document.getElementById('teacherOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('qtNombre').focus(), 30);
+});
+
+async function addTeacherRow(){
+  const nombre = document.getElementById('qtNombre').value.trim();
+  const apellido = document.getElementById('qtApellido').value.trim();
+  const anio = document.getElementById('qtAnio').value.trim();
+  const curso = document.getElementById('qtCurso').value.trim();
+  const horario = document.getElementById('qtHorario').value.trim();
+  const materia = document.getElementById('qtMateria').value.trim();
+  const personName = `${nombre} ${apellido}`.trim();
+  if(!personName){ toast('Poné al menos el nombre.'); return; }
+
+  const parentId = document.getElementById('qtParent').value || null;
+  const teamText = document.getElementById('qtTeam').value.trim();
+  const teams = teamText ? [teamText] : [];
+  const cargoName = materia ? `Docente de ${materia}` : 'Docente';
+  const pos = newNodePosition(parentId);
+  const node = {
+    id: uid(), name: cargoName, role: personName, role2: null, parentId,
+    secondaryParentIds: [], area: null, teams, rank: null, tasks: null,
+    startYear: anio || null, subject: materia || null, courses: curso || null, schedule: horario || null,
+    pinned: false, x: pos.x, y: pos.y
+  };
+  state.nodes.push(node);
+  if(teams.length) compactTeamIfScattered(teams[0]);
+  await saveState();
+  render();
+
+  teacherBatch.push(node.id);
+  renderTeacherList();
+  clearTeacherFields();
+  toast(`"${personName}" agregado.`);
+  document.getElementById('qtNombre').focus();
+}
+document.getElementById('btnAddTeacherRow').addEventListener('click', addTeacherRow);
+document.getElementById('teacherOverlay').addEventListener('keydown', e => {
+  if(e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.closest('.modal') && !e.target.id.startsWith('qtParent')){
+    e.preventDefault();
+    addTeacherRow();
+  }
+});
+document.getElementById('btnCloseTeacherModal').addEventListener('click', () => {
+  document.getElementById('teacherOverlay').classList.remove('open');
+});
+document.getElementById('teacherOverlay').addEventListener('click', e => {
+  if(e.target.id === 'teacherOverlay') document.getElementById('teacherOverlay').classList.remove('open');
+});
+
 document.getElementById('fParent').addEventListener('change', () => populateSecondaryList(editingId));
 
 document.getElementById('nodeForm').addEventListener('submit', async e => {
@@ -1712,9 +1854,24 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
     node.secondaryParentIds = secondaryParentIds; node.area = area; node.teams = teams; node.rank = rank;
     node.tasks = tasks; node.startYear = startYear; node.subject = subject; node.courses = courses; node.schedule = schedule;
   } else if(bulkNames.length){
-    bulkNames.forEach(n => {
+    bulkNames.forEach(line => {
       const pos = newNodePosition(parentId);
-      state.nodes.push({ id: uid(), name: n, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks, startYear, subject, courses, schedule, pinned: false, x: pos.x, y: pos.y });
+      if(line.includes('|')){
+        const parts = line.split('|').map(p => p.trim());
+        const personName = parts[0] || '';
+        const lineYear = parts[1] || null;
+        const lineCourses = parts[2] || null;
+        const lineSubject = parts[3] || null;
+        const cargoName = lineSubject ? `Docente de ${lineSubject}` : 'Docente';
+        state.nodes.push({
+          id: uid(), name: cargoName, role: personName, role2: null, parentId,
+          secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks,
+          startYear: lineYear, subject: lineSubject, courses: lineCourses, schedule,
+          pinned: false, x: pos.x, y: pos.y
+        });
+      } else {
+        state.nodes.push({ id: uid(), name: line, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks, startYear, subject, courses, schedule, pinned: false, x: pos.x, y: pos.y });
+      }
     });
     toast(`${bulkNames.length} cargos agregados, todos al mismo nivel.`);
   } else {
