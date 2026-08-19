@@ -820,6 +820,7 @@ function render(){
         : `color:${color}; border-color:${color};`;
       return `<span class="mini-team-chip${isPrimary ? ' primary' : ''}" style="${style}" title="${isPrimary ? 'Equipo principal' : 'También pertenece a'}">${escapeHtml(t)}</span>`;
     }).join('');
+    const isTeacherTeamCard = node.name.trim().toLowerCase() === 'equipo docente';
     cardsHtml += `
       <div class="card-wrap${dimmed ? ' dimmed' : ''}${isMatch ? ' search-match' : ''}${node.pinned ? ' pinned' : ''}" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
         <div class="card" style="border-left-color:${colorVar(depth)}">
@@ -830,7 +831,7 @@ function render(){
             <button class="icon-btn" data-action="add" data-id="${node.id}" title="Agregar subordinado">+</button>
             <button class="icon-btn" data-action="edit" data-id="${node.id}" title="Editar">✎</button>
           </div>
-          <div class="name">${escapeHtml(node.name)}</div>
+          <div class="name">${isTeacherTeamCard ? '🍎 ' : ''}${escapeHtml(node.name)}</div>
           ${node.role ? `<div class="role">${escapeHtml(node.role)}</div>` : ''}
           ${node.role2 ? `<div class="role">${escapeHtml(node.role2)}</div>` : ''}
           ${badge}
