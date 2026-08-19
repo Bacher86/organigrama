@@ -762,19 +762,34 @@ async function loadState(){
   await saveState();
   if(!FIREBASE_CONFIGURED) setConnBadge('local');
 }
+// Firestore rejects any field that's `undefined` (as opposed to null) with a
+// silent-looking write failure — this strips those out recursively so a
+// stray undefined somewhere in an older node can't quietly block a save.
+function sanitizeForFirestore(value){
+  if(Array.isArray(value)) return value.map(sanitizeForFirestore);
+  if(value && typeof value === 'object'){
+    const out = {};
+    Object.keys(value).forEach(k => { out[k] = sanitizeForFirestore(value[k] === undefined ? null : value[k]); });
+    return out;
+  }
+  return value;
+}
 async function saveState(){
+  let cloudOk = false;
   if(fsDocRef){
     try{
-      await fsDocRef.set(state);
-      return;
+      await fsDocRef.set(sanitizeForFirestore(state));
+      cloudOk = true;
     }catch(err){
       console.error('No se pudo guardar en Firebase', err);
       toast('No se pudo guardar en la base de datos, revisá la conexión.');
       setConnBadge('error');
     }
   }
+  // always keep a local backup too, regardless of whether the cloud write worked
   try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
-  catch(e){ console.error('No se pudo guardar', e); }
+  catch(e){ console.error('No se pudo guardar local', e); }
+  if(cloudOk) setConnBadge('cloud');
 }
 
 
@@ -1066,6 +1081,7 @@ function renderTeamBoxes(){
         <button type="button" class="team-arrange-btn${leaderHidden ? ' active' : ''}" data-team="${escapeHtml(team)}" data-orient="toggle-leader" title="${leaderHidden ? 'Mostrar el líder' : 'Ocultar el líder'}">👑</button>
         <button type="button" class="team-arrange-btn" data-team="${escapeHtml(team)}" data-orient="collapse" title="${collapsed ? 'Expandir equipo' : 'Colapsar equipo (mostrar solo el líder)'}">${collapsed ? '▸' : '▾'}</button>
         <button type="button" class="team-arrange-btn" data-team="${escapeHtml(team)}" data-orient="export" title="Descargar imagen de este equipo">⬇</button>
+        <button type="button" class="team-arrange-btn" data-team="${escapeHtml(team)}" data-orient="roster" title="Ver lista completa (aunque esté colapsado)">📋</button>
       </div>` : ''}
     </div>`;
   });
@@ -1117,6 +1133,7 @@ function renderTeamBoxes(){
         render();
       }
       else if(orient === 'export'){ await exportTeamPng(team); }
+      else if(orient === 'roster'){ openTeamRoster(team); }
       else if(orient === 'pin'){
         toggleTeamPinned(team);
         await saveState();
@@ -1768,6 +1785,53 @@ function openProfile(nodeId){
   });
 }
 function closeProfile(){ document.getElementById('profileOverlay').classList.remove('open'); }
+
+// A full roster for one team, independent of whether it's collapsed on the
+// canvas — this is the reliable way to confirm someone was actually saved.
+function openTeamRoster(team){
+  const members = homeMembersOf(team);
+  const allTeamsGlobal = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(x => x.trim()).filter(Boolean))].sort();
+  const tIdx = allTeamsGlobal.indexOf(team);
+  const color = TEAM_COLORS[tIdx % TEAM_COLORS.length];
+
+  const rows = members.map(m => {
+    const detail = [m.subject, m.courses, m.schedule, m.startYear ? `Ingreso ${m.startYear}` : null].filter(Boolean).join(' · ');
+    return `<div class="profile-edit-block" style="cursor:pointer;" data-view-member="${m.id}">
+      <div style="font-weight:700; font-size:13.5px;">${escapeHtml(m.role || '(sin persona asignada)')}</div>
+      <div style="font-size:11.5px; color:var(--ink-soft);">${escapeHtml(m.name)}</div>
+      ${detail ? `<div style="font-size:12px; color:var(--ink-soft); margin-top:3px;">${escapeHtml(detail)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('profileModalContent').innerHTML = `
+    <div class="profile-header">
+      <div class="bar" style="background:${color};"></div>
+      <div>
+        <div class="profile-name">${escapeHtml(team)}</div>
+        <div class="profile-people">${members.length} persona${members.length === 1 ? '' : 's'} cargada${members.length === 1 ? '' : 's'}</div>
+      </div>
+    </div>
+    <div class="profile-section">
+      <h4>Lista completa</h4>
+      ${rows || '<div class="profile-empty">Todavía no hay nadie cargado en este equipo.</div>'}
+    </div>
+    <button type="button" class="btn btn-primary" id="btnRosterAdd" style="width:100%; margin-top:4px;">🍎 Agregar docente a "${escapeHtml(team)}"</button>
+    <div class="profile-actions">
+      <button type="button" class="btn btn-ghost" id="btnCloseProfile">Cerrar</button>
+    </div>
+  `;
+  document.getElementById('profileOverlay').classList.add('open');
+  document.getElementById('btnCloseProfile').addEventListener('click', closeProfile);
+  document.querySelectorAll('[data-view-member]').forEach(el => {
+    el.addEventListener('click', () => { closeProfile(); openProfile(el.getAttribute('data-view-member')); });
+  });
+  document.getElementById('btnRosterAdd').addEventListener('click', () => {
+    closeProfile();
+    const leader = teamLeader(members);
+    openTeacherModal(leader ? (leader.parentId || '') : '', team);
+  });
+}
+
 document.getElementById('profileOverlay').addEventListener('click', e => { if(e.target.id === 'profileOverlay') closeProfile(); });
 
 /* ---------- quick teacher entry ---------- */
