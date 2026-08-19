@@ -1674,6 +1674,18 @@ function openProfile(nodeId){
     return `<span class="mini-team-chip" style="border-color:${colorVar(d)}; color:${colorVar(d)};">${escapeHtml(pn.name)}</span>`;
   }).join(' ');
 
+  // teammates: everyone else who shares this node's home team, regardless of
+  // where in the tree they sit — this is what a "Docentes Jardín" grouping
+  // is really asking to see, not just direct tree-children.
+  const homeTeam = (node.teams||[])[0];
+  let teammatesHtml = '';
+  if(homeTeam){
+    const teammates = homeMembersOf(homeTeam).filter(m => !personNodeIds.has(m.id));
+    teammatesHtml = teammates.length
+      ? `<ul class="profile-list">${teammates.map(m => `<li>${escapeHtml(m.role ? `${m.role} — ${m.name}` : m.name)}</li>`).join('')}</ul>`
+      : `<div class="profile-empty">Todavía no hay nadie más cargado en "${escapeHtml(homeTeam)}".</div>`;
+  }
+
   // datos adicionales (año/materia/cursos/horario) + tareas, editables ahí mismo
   const editBlocksHtml = personNodes.map(pn => `
     <div class="profile-edit-block" data-node="${pn.id}">
@@ -1712,6 +1724,12 @@ function openProfile(nodeId){
       <h4>Le reportan</h4>
       ${subsHtml}
     </div>
+    ${homeTeam ? `
+    <div class="profile-section">
+      <h4>Compañeros de equipo — ${escapeHtml(homeTeam)}</h4>
+      ${teammatesHtml}
+      <button type="button" class="btn btn-ghost" id="btnQuickAddToTeam" style="margin-top:8px; width:100%;">🍎 Agregar otro docente a "${escapeHtml(homeTeam)}"</button>
+    </div>` : ''}
     <div class="profile-section">
       <h4>Datos y tareas <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--ink-soft);">(editable acá mismo)</span></h4>
       ${editBlocksHtml}
@@ -1728,6 +1746,13 @@ function openProfile(nodeId){
     closeProfile();
     openModal(nodeId, null);
   });
+  const btnQuickAddToTeam = document.getElementById('btnQuickAddToTeam');
+  if(btnQuickAddToTeam){
+    btnQuickAddToTeam.addEventListener('click', () => {
+      closeProfile();
+      openTeacherQuickAddFor(node);
+    });
+  }
   document.getElementById('btnSaveProfileFields').addEventListener('click', async () => {
     document.querySelectorAll('.profile-edit-block').forEach(block => {
       const pn = nodeById(block.getAttribute('data-node'));
@@ -1793,19 +1818,31 @@ let lastTeacherParent = '';
 let lastTeacherPreset = '';
 let lastTeacherTeam = '';
 
-document.getElementById('btnOpenTeacher').addEventListener('click', () => {
+const TEACHER_PRESETS = ['Docentes Jardín','Docentes Primaria 1er Ciclo','Docentes Primaria 2do Ciclo','Docentes Secundaria Varones','Docentes Secundaria Mujeres'];
+
+function openTeacherModal(parentValue, teamValue){
   teacherBatch = [];
   renderTeacherList();
   fillGenericParentSelect(document.getElementById('qtParent'));
   populateTeamOptions();
-  // remember the last "Depende de" / nivel used, so reopening the modal for
-  // another batch doesn't silently reset it and leave someone unassigned
-  document.getElementById('qtParent').value = lastTeacherParent;
-  document.getElementById('qtNivelPreset').value = lastTeacherPreset;
-  document.getElementById('qtTeam').value = lastTeacherTeam;
+  document.getElementById('qtParent').value = parentValue;
+  document.getElementById('qtTeam').value = teamValue;
+  document.getElementById('qtNivelPreset').value = TEACHER_PRESETS.includes(teamValue) ? teamValue : (teamValue ? '__custom__' : '');
   clearTeacherFields();
   document.getElementById('teacherOverlay').classList.add('open');
   setTimeout(() => document.getElementById('qtNombre').focus(), 30);
+}
+
+// Opens the quick-add form already locked to this node's own superior and
+// team, so adding "one more like this" needs zero re-selection.
+function openTeacherQuickAddFor(node){
+  openTeacherModal(node.parentId || '', (node.teams||[])[0] || '');
+}
+
+document.getElementById('btnOpenTeacher').addEventListener('click', () => {
+  // remember the last "Depende de" / nivel used, so reopening the modal for
+  // another batch doesn't silently reset it and leave someone unassigned
+  openTeacherModal(lastTeacherParent, lastTeacherTeam);
 });
 document.getElementById('qtNivelPreset').addEventListener('change', () => {
   const val = document.getElementById('qtNivelPreset').value;
