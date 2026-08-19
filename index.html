@@ -434,9 +434,21 @@
       <select id="qtParent"></select>
     </div>
     <div class="field">
-      <label for="qtTeam">Equipo (opcional)</label>
-      <input id="qtTeam" type="text" list="teamOptions" placeholder="Ej: Docentes">
-      <div class="field-note">Se completa una sola vez — se mantiene para todos los que cargues a continuación.</div>
+      <label for="qtNivelPreset">Nivel / ciclo</label>
+      <select id="qtNivelPreset">
+        <option value="">— Elegir nivel —</option>
+        <option value="Docentes Jardín">Jardín</option>
+        <option value="Docentes Primaria 1er Ciclo">Primaria 1er Ciclo</option>
+        <option value="Docentes Primaria 2do Ciclo">Primaria 2do Ciclo</option>
+        <option value="Docentes Secundaria Varones">Secundaria Varones</option>
+        <option value="Docentes Secundaria Mujeres">Secundaria Mujeres</option>
+        <option value="__custom__">Otro (escribir abajo)…</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="qtTeam">Equipo</label>
+      <input id="qtTeam" type="text" list="teamOptions" placeholder="Se completa solo al elegir un nivel arriba">
+      <div class="field-note">Elegí un nivel arriba y este campo se completa solo — así todos los que cargues a continuación quedan agrupados exactos, sin errores de tipeo. Cambiá el nivel cuando pases a cargar el siguiente grupo.</div>
     </div>
     <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
     <div class="field">
@@ -1783,9 +1795,20 @@ document.getElementById('btnOpenTeacher').addEventListener('click', () => {
   fillGenericParentSelect(document.getElementById('qtParent'));
   populateTeamOptions();
   document.getElementById('qtTeam').value = '';
+  document.getElementById('qtNivelPreset').value = '';
   clearTeacherFields();
   document.getElementById('teacherOverlay').classList.add('open');
   setTimeout(() => document.getElementById('qtNombre').focus(), 30);
+});
+document.getElementById('qtNivelPreset').addEventListener('change', () => {
+  const val = document.getElementById('qtNivelPreset').value;
+  const teamInput = document.getElementById('qtTeam');
+  if(val === '__custom__'){
+    teamInput.value = '';
+    teamInput.focus();
+  } else if(val){
+    teamInput.value = val;
+  }
 });
 
 async function addTeacherRow(){
