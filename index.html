@@ -1789,13 +1789,20 @@ function clearTeacherFields(){
   ['qtNombre','qtApellido','qtAnio','qtCurso','qtHorario','qtMateria'].forEach(id => document.getElementById(id).value = '');
 }
 
+let lastTeacherParent = '';
+let lastTeacherPreset = '';
+let lastTeacherTeam = '';
+
 document.getElementById('btnOpenTeacher').addEventListener('click', () => {
   teacherBatch = [];
   renderTeacherList();
   fillGenericParentSelect(document.getElementById('qtParent'));
   populateTeamOptions();
-  document.getElementById('qtTeam').value = '';
-  document.getElementById('qtNivelPreset').value = '';
+  // remember the last "Depende de" / nivel used, so reopening the modal for
+  // another batch doesn't silently reset it and leave someone unassigned
+  document.getElementById('qtParent').value = lastTeacherParent;
+  document.getElementById('qtNivelPreset').value = lastTeacherPreset;
+  document.getElementById('qtTeam').value = lastTeacherTeam;
   clearTeacherFields();
   document.getElementById('teacherOverlay').classList.add('open');
   setTimeout(() => document.getElementById('qtNombre').focus(), 30);
@@ -1823,6 +1830,13 @@ async function addTeacherRow(){
 
   const parentId = document.getElementById('qtParent').value || null;
   const teamText = document.getElementById('qtTeam').value.trim();
+  if(!teamText){
+    if(!confirm('No elegiste un Nivel/Equipo. Este docente se va a crear, pero NO va a aparecer agrupado en ningún recuadro. ¿Cargarlo igual sin equipo?')) return;
+  }
+  lastTeacherParent = document.getElementById('qtParent').value;
+  lastTeacherPreset = document.getElementById('qtNivelPreset').value;
+  lastTeacherTeam = teamText;
+
   const teams = teamText ? [teamText] : [];
   const cargoName = materia ? `Docente de ${materia}` : 'Docente';
   const pos = newNodePosition(parentId);
@@ -1840,7 +1854,7 @@ async function addTeacherRow(){
   teacherBatch.push(node.id);
   renderTeacherList();
   clearTeacherFields();
-  toast(`"${personName}" agregado.`);
+  toast(teams.length ? `"${personName}" agregado a "${teamText}".` : `"${personName}" agregado sin equipo.`);
   document.getElementById('qtNombre').focus();
 }
 document.getElementById('btnAddTeacherRow').addEventListener('click', addTeacherRow);
