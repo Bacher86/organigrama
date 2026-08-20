@@ -335,6 +335,11 @@
     <button type="button" id="btnExitFocus">✕ Ver organigrama completo</button>
   </div>
 
+  <div id="remoteUpdateBanner" class="focus-banner" style="display:none; background:#255A52;">
+    <span>☁ Hay cambios guardados desde otra sesión — recargá para verlos actualizados.</span>
+    <button type="button" id="btnReloadFromCloud">🔄 Recargar</button>
+  </div>
+
   <div class="canvas-wrap" id="canvasWrap">
     <div id="canvasContent">
       <svg id="linksSvg"></svg>
@@ -522,28 +527,55 @@ if(FIREBASE_CONFIGURED){
   }
 }
 
-function setConnBadge(mode){
+function setConnBadge(mode, detail){
   const el = document.getElementById('connBadge');
   if(!el) return;
-  if(mode === 'cloud'){ el.textContent = '☁ Conectado (Firebase)'; el.className = 'conn-badge conn-cloud'; }
-  else if(mode === 'error'){ el.textContent = '⚠ Sin conexión a la base'; el.className = 'conn-badge conn-error'; }
-  else { el.textContent = '💾 Guardado local (este chat)'; el.className = 'conn-badge conn-local'; }
+  if(mode === 'cloud'){ el.textContent = '☁ Conectado (Firebase)'; el.className = 'conn-badge conn-cloud'; el.title = ''; }
+  else if(mode === 'error'){ el.textContent = '⚠ Error de base de datos (tocá para ver)'; el.className = 'conn-badge conn-error'; el.title = detail || 'Sin detalle'; }
+  else { el.textContent = '💾 Guardado local (este chat)'; el.className = 'conn-badge conn-local'; el.title = ''; }
 }
+const connBadgeEl = document.getElementById('connBadge');
+if(connBadgeEl) connBadgeEl.addEventListener('click', () => { if(connBadgeEl.title) alert('Detalle del error:\n\n' + connBadgeEl.title); });
 
+let suppressRemoteBannerUntil = 0;
 function subscribeRealtime(){
   if(!fsDocRef || fsUnsubscribe) return;
   fsUnsubscribe = fsDocRef.onSnapshot(snap => {
     if(snap.metadata.hasPendingWrites) return; // echo of our own write, ignore
+    if(snap.metadata.fromCache) return; // not a confirmed server update
+    setConnBadge('cloud');
+    // IMPORTANT: this used to overwrite local `state` immediately, which
+    // could clobber a save that was still in flight (e.g. loading several
+    // teachers one after another) and made data look like it disappeared.
+    // Now it only offers a reload — nothing gets overwritten silently.
+    if(Date.now() < suppressRemoteBannerUntil) return;
     const parsed = snap.data();
     if(!parsed || !Array.isArray(parsed.nodes)) return;
-    state = parsed;
-    migrateState();
-    render();
-    setConnBadge('cloud');
+    if(JSON.stringify(parsed) === JSON.stringify(state)) return; // no real difference
+    document.getElementById('remoteUpdateBanner').style.display = 'flex';
   }, err => {
     console.error('Error de conexión en tiempo real', err);
     setConnBadge('error');
   });
+}
+async function reloadFromCloud(){
+  document.getElementById('remoteUpdateBanner').style.display = 'none';
+  if(!fsDocRef) return;
+  try{
+    const snap = await fsDocRef.get();
+    if(snap.exists){
+      const parsed = snap.data();
+      if(parsed && Array.isArray(parsed.nodes)){
+        state = parsed;
+        migrateState();
+        render();
+        toast('Organigrama actualizado.');
+      }
+    }
+  }catch(err){
+    console.error('No se pudo recargar', err);
+    toast('No se pudo recargar desde la base de datos.');
+  }
 }
 
 const COLORS = ['c0','c1','c2','c3','c4','c5'];
@@ -742,19 +774,21 @@ async function loadState(){
       return;
     }catch(err){
       console.error('No se pudo conectar a Firebase, uso guardado local por ahora', err);
-      setConnBadge('error');
+      setConnBadge('error', `Al leer: ${err.code || ''} ${err.message || err}`.trim());
     }
   }
   // fallback: personal local storage (no Firebase configured, or connection failed)
   try{
-    const res = await window.storage.get(STORAGE_KEY, false);
-    if(res && res.value){
-      const parsed = JSON.parse(res.value);
-      if(parsed && Array.isArray(parsed.nodes)){
-        state = parsed;
-        migrateState();
-        if(!FIREBASE_CONFIGURED) setConnBadge('local');
-        return;
+    if(window.storage && typeof window.storage.get === 'function'){
+      const res = await window.storage.get(STORAGE_KEY, false);
+      if(res && res.value){
+        const parsed = JSON.parse(res.value);
+        if(parsed && Array.isArray(parsed.nodes)){
+          state = parsed;
+          migrateState();
+          if(!FIREBASE_CONFIGURED) setConnBadge('local');
+          return;
+        }
       }
     }
   }catch(e){ /* nothing saved yet */ }
@@ -776,19 +810,23 @@ function sanitizeForFirestore(value){
 }
 async function saveState(){
   let cloudOk = false;
+  suppressRemoteBannerUntil = Date.now() + 4000; // this is our own change, don't flag it as "new from elsewhere"
   if(fsDocRef){
     try{
       await fsDocRef.set(sanitizeForFirestore(state));
       cloudOk = true;
     }catch(err){
       console.error('No se pudo guardar en Firebase', err);
-      toast('No se pudo guardar en la base de datos, revisá la conexión.');
-      setConnBadge('error');
+      const detail = `${err.code || ''} ${err.message || err}`.trim();
+      toast(`No se pudo guardar en la base: ${detail}`);
+      setConnBadge('error', `Al guardar: ${detail}`);
     }
   }
   // always keep a local backup too, regardless of whether the cloud write worked
-  try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
-  catch(e){ console.error('No se pudo guardar local', e); }
+  if(window.storage && typeof window.storage.set === 'function'){
+    try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
+    catch(e){ console.error('No se pudo guardar local', e); }
+  }
   if(cloudOk) setConnBadge('cloud');
 }
 
@@ -808,6 +846,7 @@ document.getElementById('btnExitFocus').addEventListener('click', () => {
   focusedTeam = null;
   render();
 });
+document.getElementById('btnReloadFromCloud').addEventListener('click', reloadFromCloud);
 
 function render(){
   updateFocusBanner();
