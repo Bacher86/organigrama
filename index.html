@@ -118,6 +118,22 @@
   .sub-list-empty{ padding:8px 7px; font-size:12.5px; color:var(--ink-soft); font-style:italic; }
   .field .field-note{ font-size:11.5px; color:var(--ink-soft); margin-top:5px; font-weight:400; text-transform:none; letter-spacing:normal; }
 
+  #qtList{ max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:8px; background:#FBFAF7; }
+  .docente-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  .docente-table th{
+    position:sticky; top:0; text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--ink-soft); border-bottom:1px solid var(--line); padding:8px 10px; background:#F1EDE3; white-space:nowrap;
+  }
+  .docente-table td{ padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; color:var(--ink); }
+  .docente-table tr:last-child td{ border-bottom:none; }
+  .docente-table tr:hover td{ background:#F1EDE3; }
+  .docente-table input{
+    width:100%; padding:5px 7px; border:1px solid var(--line); border-radius:5px; font-size:12.5px;
+    background:var(--paper); color:var(--ink); font-family:'IBM Plex Sans', sans-serif;
+  }
+  .docente-row-actions{ display:flex; gap:4px; white-space:nowrap; }
+  .docente-empty-row td{ color:var(--ink-soft); font-style:italic; text-align:center; padding:18px; }
+
   .empty-state{ max-width:380px; margin:80px auto; text-align:center; color: var(--ink-soft); position:relative; }
   .empty-state h2{ font-family:'Fraunces', serif; color: var(--ink); font-size:20px; margin-bottom:6px;}
   .empty-state p{ font-size:13.5px; line-height:1.5; margin-bottom:18px; }
@@ -436,11 +452,11 @@
 </div>
 
 <div class="overlay" id="teacherOverlay">
-  <div class="modal" style="width:430px;">
+  <div class="modal" style="width:min(760px, 92vw);">
     <h3 id="teacherModalTitle">Lista de docentes</h3>
     <div class="field">
       <label>Docentes cargados acá (<span id="qtCount">0</span>)</label>
-      <div class="sub-list" id="qtList"><div class="sub-list-empty">Todavía no hay ninguno cargado.</div></div>
+      <div id="qtList"><div class="sub-list-empty">Todavía no hay ninguno cargado.</div></div>
     </div>
     <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
     <div class="field">
@@ -1884,6 +1900,7 @@ document.getElementById('profileOverlay').addEventListener('click', e => { if(e.
 // nothing new gets added to the org chart canvas. Click a card, press
 // Shift+D (or use its 📋 button), and the list you see/add is that card's own.
 let docenteTargetNodeId = null;
+let editingDocenteId = null; // which row (if any) is currently in edit mode
 
 function renderDocenteList(node){
   const box = document.getElementById('qtList');
@@ -1893,21 +1910,80 @@ function renderDocenteList(node){
     box.innerHTML = `<div class="sub-list-empty">Todavía no hay ninguno cargado.</div>`;
     return;
   }
-  box.innerHTML = list.map(d => {
-    const detail = [d.materia, d.curso, d.horario, d.anio ? `Ingreso ${d.anio}` : null].filter(Boolean).join(' · ');
-    return `<label style="justify-content:space-between; align-items:flex-start;">
-      <span><strong>${escapeHtml(`${d.nombre} ${d.apellido}`.trim() || '(sin nombre)')}</strong>${detail ? `<br><span style="color:var(--ink-soft); font-weight:400; font-size:12px;">${escapeHtml(detail)}</span>` : ''}</span>
-      <button type="button" class="icon-btn" data-remove-docente="${d.id}" title="Sacar de la lista">✕</button>
-    </label>`;
+  const rows = list.map(d => {
+    if(editingDocenteId === d.id){
+      return `<tr data-row="${d.id}">
+        <td><input class="ed-nombre" value="${escapeHtml(d.nombre||'')}"></td>
+        <td><input class="ed-apellido" value="${escapeHtml(d.apellido||'')}"></td>
+        <td><input class="ed-anio" value="${escapeHtml(d.anio||'')}"></td>
+        <td><input class="ed-curso" value="${escapeHtml(d.curso||'')}"></td>
+        <td><input class="ed-horario" value="${escapeHtml(d.horario||'')}"></td>
+        <td><input class="ed-materia" value="${escapeHtml(d.materia||'')}"></td>
+        <td class="docente-row-actions">
+          <button type="button" class="icon-btn" data-save-docente="${d.id}" title="Guardar">✓</button>
+          <button type="button" class="icon-btn" data-cancel-docente="${d.id}" title="Cancelar">✕</button>
+        </td>
+      </tr>`;
+    }
+    return `<tr data-row="${d.id}">
+      <td>${escapeHtml(d.nombre||'') || '—'}</td>
+      <td>${escapeHtml(d.apellido||'') || '—'}</td>
+      <td>${escapeHtml(d.anio||'') || '—'}</td>
+      <td>${escapeHtml(d.curso||'') || '—'}</td>
+      <td>${escapeHtml(d.horario||'') || '—'}</td>
+      <td>${escapeHtml(d.materia||'') || '—'}</td>
+      <td class="docente-row-actions">
+        <button type="button" class="icon-btn" data-edit-docente="${d.id}" title="Editar">✎</button>
+        <button type="button" class="icon-btn" data-remove-docente="${d.id}" title="Eliminar">🗑</button>
+      </td>
+    </tr>`;
   }).join('');
-  box.querySelectorAll('[data-remove-docente]').forEach(b => {
+  box.innerHTML = `<table class="docente-table"><thead><tr>
+    <th>Nombre</th><th>Apellido</th><th>Año</th><th>Curso</th><th>Horario</th><th>Materia</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+
+  box.querySelectorAll('[data-edit-docente]').forEach(b => {
+    b.addEventListener('click', () => {
+      editingDocenteId = b.getAttribute('data-edit-docente');
+      renderDocenteList(node);
+      const tr = box.querySelector(`tr[data-row="${editingDocenteId}"]`);
+      if(tr) tr.querySelector('.ed-nombre').focus();
+    });
+  });
+  box.querySelectorAll('[data-cancel-docente]').forEach(b => {
+    b.addEventListener('click', () => { editingDocenteId = null; renderDocenteList(node); });
+  });
+  box.querySelectorAll('[data-save-docente]').forEach(b => {
     b.addEventListener('click', async () => {
-      const did = b.getAttribute('data-remove-docente');
-      node.docentes = (node.docentes || []).filter(d => d.id !== did);
+      const id = b.getAttribute('data-save-docente');
+      const tr = box.querySelector(`tr[data-row="${id}"]`);
+      const d = (node.docentes||[]).find(x => x.id === id);
+      if(d && tr){
+        d.nombre = tr.querySelector('.ed-nombre').value.trim();
+        d.apellido = tr.querySelector('.ed-apellido').value.trim();
+        d.anio = tr.querySelector('.ed-anio').value.trim();
+        d.curso = tr.querySelector('.ed-curso').value.trim();
+        d.horario = tr.querySelector('.ed-horario').value.trim();
+        d.materia = tr.querySelector('.ed-materia').value.trim();
+      }
+      editingDocenteId = null;
       await saveState();
       render();
       renderDocenteList(node);
-      toast('Docente sacado de la lista.');
+      toast('Docente actualizado.');
+    });
+  });
+  box.querySelectorAll('[data-remove-docente]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const did = b.getAttribute('data-remove-docente');
+      const d = (node.docentes||[]).find(x => x.id === did);
+      const label = d ? `${d.nombre} ${d.apellido}`.trim() || 'este docente' : 'este docente';
+      if(!confirm(`¿Eliminar a "${label}" de la lista? Esta acción no se puede deshacer.`)) return;
+      node.docentes = (node.docentes || []).filter(x => x.id !== did);
+      await saveState();
+      render();
+      renderDocenteList(node);
+      toast('Docente eliminado.');
     });
   });
 }
@@ -1920,6 +1996,7 @@ function clearDocenteFields(){
 // docentes now, whether triggered by the 📋 button or by Shift+D.
 function openDocenteRoster(node){
   docenteTargetNodeId = node.id;
+  editingDocenteId = null;
   document.getElementById('teacherModalTitle').textContent = `Lista de docentes — ${node.name}`;
   renderDocenteList(node);
   clearDocenteFields();
@@ -1952,6 +2029,11 @@ document.getElementById('btnAddTeacherRow').addEventListener('click', addDocente
 document.getElementById('teacherOverlay').addEventListener('keydown', e => {
   if(e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.closest('.modal')){
     e.preventDefault();
+    const tr = e.target.closest('tr[data-row]');
+    if(tr){
+      const saveBtn = tr.querySelector('[data-save-docente]');
+      if(saveBtn){ saveBtn.click(); return; }
+    }
     addDocenteRow();
   }
 });
