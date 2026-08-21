@@ -134,6 +134,28 @@
   .docente-row-actions{ display:flex; gap:4px; white-space:nowrap; }
   .docente-empty-row td{ color:var(--ink-soft); font-style:italic; text-align:center; padding:18px; }
 
+  .avatar-circle{ border-radius:50%; object-fit:cover; flex:none; background:#EFEAE0; }
+  .avatar-placeholder{
+    display:flex; align-items:center; justify-content:center; border-radius:50%; background:#EFEAE0;
+    color:var(--ink-soft); font-weight:700; flex:none;
+  }
+
+  .view-tabs{ display:flex; gap:2px; padding:0 28px; border-bottom:1px solid var(--line); background:var(--paper); flex:none; }
+  .tab-btn{
+    background:none; border:none; padding:11px 18px; font-size:13.5px; font-weight:600; color:var(--ink-soft);
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+  }
+  .tab-btn:hover{ color:var(--ink); }
+  .tab-btn.active{ color:var(--ink); border-bottom-color:var(--ink); }
+
+  .profiles-list-row{
+    display:flex; align-items:center; gap:14px; padding:11px 12px; border-bottom:1px solid var(--line);
+    cursor:pointer; background:var(--paper); border-radius:6px; margin-bottom:2px;
+  }
+  .profiles-list-row:hover{ background:#F1EDE3; }
+  .profiles-row-name{ font-weight:700; font-size:14px; color:var(--ink); }
+  .profiles-row-cargo{ font-size:12.5px; color:var(--ink-soft); margin-top:1px; }
+
   .empty-state{ max-width:380px; margin:80px auto; text-align:center; color: var(--ink-soft); position:relative; }
   .empty-state h2{ font-family:'Fraunces', serif; color: var(--ink); font-size:20px; margin-bottom:6px;}
   .empty-state p{ font-size:13.5px; line-height:1.5; margin-bottom:18px; }
@@ -346,6 +368,11 @@
     </div>
   </header>
 
+  <div class="view-tabs">
+    <button class="tab-btn active" id="tabChart" data-view="chart">🗂 Organigrama</button>
+    <button class="tab-btn" id="tabProfiles" data-view="profiles">👤 Perfiles</button>
+  </div>
+
   <div id="focusBanner" class="focus-banner" style="display:none;">
     <span id="focusBannerText"></span>
     <button type="button" id="btnExitFocus">✕ Ver organigrama completo</button>
@@ -361,6 +388,13 @@
       <svg id="linksSvg"></svg>
     </div>
   </div>
+
+  <div class="canvas-wrap" id="profilesView" style="display:none; padding:22px 28px;">
+    <div class="field" style="max-width:340px; margin-bottom:18px;">
+      <input type="text" id="profilesSearch" placeholder="Buscar por nombre o cargo…">
+    </div>
+    <div id="profilesList"></div>
+  </div>
 </div>
 
 <div class="overlay" id="overlay">
@@ -370,6 +404,15 @@
       <div class="field">
         <label for="fName">Nombre del cargo</label>
         <input id="fName" type="text" placeholder="Ej: Vicedirección">
+      </div>
+      <div class="field">
+        <label>Foto de perfil (opcional)</label>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <img id="fPhotoPreview" class="avatar-circle" style="width:56px; height:56px; display:none;">
+          <div id="fPhotoPlaceholder" class="avatar-placeholder" style="width:56px; height:56px; font-size:11px;">Sin foto</div>
+          <input type="file" id="fPhotoInput" accept="image/*" style="flex:1; font-size:12.5px;">
+          <button type="button" class="btn btn-ghost" id="btnRemovePhoto" style="display:none;">Quitar</button>
+        </div>
       </div>
       <div class="field">
         <label for="fRole">Persona / detalle (opcional)</label>
@@ -621,6 +664,36 @@ function effectiveLevel(id){
 }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+function initialsOf(name){
+  return (name||'').trim().split(/\s+/).filter(Boolean).slice(0,2).map(w => w[0].toUpperCase()).join('') || '?';
+}
+// Resizes + compresses a photo client-side before storing it (base64) — this
+// keeps the shared database document small since there's no separate file
+// storage set up; a few dozen small thumbnails fit fine, but very large
+// batches of high-res photos would eventually need real file storage instead.
+function readAndResizeImage(file, maxSize, quality){
+  maxSize = maxSize || 220; quality = quality || 0.78;
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if(w > h){ if(w > maxSize){ h = Math.round(h * maxSize / w); w = maxSize; } }
+        else { if(h > maxSize){ w = Math.round(w * maxSize / h); h = maxSize; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function autoLayout(){
   // Anything pinned (a person or a whole team) keeps its x,y — but the cursor
   // used to just ignore where those pinned things actually sit, so a freshly
@@ -744,6 +817,8 @@ function migrateState(){
     if(n.courses === undefined) n.courses = null;
     if(n.schedule === undefined) n.schedule = null;
     if(!Array.isArray(n.docentes)) n.docentes = [];
+    if(n.photo === undefined) n.photo = null;
+    n.docentes.forEach(d => { if(d.tasks === undefined) d.tasks = null; if(d.photo === undefined) d.photo = null; });
     delete n.team;
   });
   if(!Array.isArray(state.collapsedTeams)) state.collapsedTeams = [];
@@ -1626,6 +1701,37 @@ function populateTeamOptions(){
 }
 
 let modalTeams = [];
+// undefined = no change from what's already saved; null = explicitly removed; string = new photo
+let pendingPhotoDataUrl = undefined;
+
+function setPhotoPreview(dataUrl){
+  const img = document.getElementById('fPhotoPreview');
+  const placeholder = document.getElementById('fPhotoPlaceholder');
+  const removeBtn = document.getElementById('btnRemovePhoto');
+  if(dataUrl){
+    img.src = dataUrl; img.style.display = 'block'; placeholder.style.display = 'none'; removeBtn.style.display = 'inline-flex';
+  } else {
+    img.style.display = 'none'; placeholder.style.display = 'flex'; removeBtn.style.display = 'none';
+  }
+}
+document.getElementById('fPhotoInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const dataUrl = await readAndResizeImage(file);
+    pendingPhotoDataUrl = dataUrl;
+    setPhotoPreview(dataUrl);
+  }catch(err){
+    console.error(err);
+    toast('No se pudo leer esa imagen.');
+  }
+});
+document.getElementById('btnRemovePhoto').addEventListener('click', () => {
+  pendingPhotoDataUrl = null;
+  document.getElementById('fPhotoInput').value = '';
+  setPhotoPreview(null);
+});
+
 function renderTeamChips(){
   const box = document.getElementById('teamChipList');
   if(!modalTeams.length){ box.innerHTML = ''; return; }
@@ -1661,6 +1767,8 @@ function openModal(nodeId, parentPreset){
   document.getElementById('fBulk').value = '';
   document.getElementById('fTeamInput').value = '';
   populateTeamOptions();
+  pendingPhotoDataUrl = undefined;
+  document.getElementById('fPhotoInput').value = '';
 
   if(nodeId){
     const node = nodeById(nodeId);
@@ -1673,6 +1781,7 @@ function openModal(nodeId, parentPreset){
     document.getElementById('fSubject').value = node.subject || '';
     document.getElementById('fCourses').value = node.courses || '';
     document.getElementById('fSchedule').value = node.schedule || '';
+    setPhotoPreview(node.photo || null);
     populateParentSelect(nodeId);
     document.getElementById('fParent').value = node.parentId || '';
     delBtn.style.display = 'inline-flex';
@@ -1690,6 +1799,7 @@ function openModal(nodeId, parentPreset){
     document.getElementById('fSubject').value = '';
     document.getElementById('fCourses').value = '';
     document.getElementById('fSchedule').value = '';
+    setPhotoPreview(null);
     populateParentSelect(null);
     document.getElementById('fParent').value = parentPreset || '';
     delBtn.style.display = 'none';
@@ -1778,24 +1888,36 @@ function openProfile(nodeId){
       : `<div class="profile-empty">Todavía no hay nadie más cargado en "${escapeHtml(homeTeam)}".</div>`;
   }
 
-  // datos adicionales (año/materia/cursos/horario) + tareas, editables ahí mismo
+  // datos adicionales (año/materia/cursos/horario) + tareas + foto, editables ahí mismo
   const editBlocksHtml = personNodes.map(pn => `
     <div class="profile-edit-block" data-node="${pn.id}">
       ${isMerged ? `<div class="profile-cargo-label">${escapeHtml(pn.name)}</div>` : ''}
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+        ${pn.photo
+          ? `<img src="${pn.photo}" class="avatar-circle" style="width:36px; height:36px;">`
+          : `<div class="avatar-placeholder" style="width:36px; height:36px; font-size:11px;">${escapeHtml(initialsOf(pn.role || pn.name))}</div>`}
+        <input type="file" class="pf-photo" data-node-photo="${pn.id}" accept="image/*" style="flex:1; font-size:12px;">
+      </div>
       <div class="mini-fields-row">
         <input type="text" class="pf-startYear" placeholder="Año de ingreso" value="${escapeHtml(pn.startYear || '')}">
         <input type="text" class="pf-subject" placeholder="Materia" value="${escapeHtml(pn.subject || '')}">
       </div>
       <div class="mini-fields-row">
         <input type="text" class="pf-courses" placeholder="Cursos / grados" value="${escapeHtml(pn.courses || '')}">
-        <input type="text" class="pf-schedule" placeholder="Horario" value="${escapeHtml(pn.schedule || '')}">
+        <input type="text" class="pf-schedule" placeholder="Horario (días y horas)" value="${escapeHtml(pn.schedule || '')}">
       </div>
       <textarea class="pf-tasks" placeholder="Tareas, una por línea">${escapeHtml(pn.tasks || '')}</textarea>
     </div>
   `).join('');
 
+  const displayName = personName || node.name;
+  const photoHtml = node.photo
+    ? `<img src="${node.photo}" class="avatar-circle" style="width:52px; height:52px;">`
+    : `<div class="avatar-placeholder" style="width:52px; height:52px; font-size:15px;">${escapeHtml(initialsOf(displayName))}</div>`;
+
   document.getElementById('profileModalContent').innerHTML = `
     <div class="profile-header">
+      ${photoHtml}
       <div class="bar" style="background:${colorVar(effectiveLevel(node.id))};"></div>
       <div>
         <div class="profile-name">${personName ? escapeHtml(personName) : escapeHtml(node.name)}</div>
@@ -1848,7 +1970,26 @@ function openProfile(nodeId){
       pn.tasks = block.querySelector('.pf-tasks').value.trim() || null;
     });
     await saveState();
+    render();
     toast('Cambios guardados.');
+  });
+  document.querySelectorAll('.pf-photo').forEach(input => {
+    input.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if(!file) return;
+      const pn = nodeById(input.getAttribute('data-node-photo'));
+      if(!pn) return;
+      try{
+        pn.photo = await readAndResizeImage(file);
+        await saveState();
+        render();
+        openProfile(nodeId); // refresh to show the new photo immediately
+        toast('Foto actualizada.');
+      }catch(err){
+        console.error(err);
+        toast('No se pudo leer esa imagen.');
+      }
+    });
   });
 }
 function closeProfile(){ document.getElementById('profileOverlay').classList.remove('open'); }
@@ -1933,6 +2074,7 @@ function renderDocenteList(node){
       <td>${escapeHtml(d.horario||'') || '—'}</td>
       <td>${escapeHtml(d.materia||'') || '—'}</td>
       <td class="docente-row-actions">
+        <button type="button" class="icon-btn" data-view-docente="${d.id}" title="Ver perfil completo (foto y tareas)">👤</button>
         <button type="button" class="icon-btn" data-edit-docente="${d.id}" title="Editar">✎</button>
         <button type="button" class="icon-btn" data-remove-docente="${d.id}" title="Eliminar">🗑</button>
       </td>
@@ -1942,6 +2084,12 @@ function renderDocenteList(node){
     <th>Nombre</th><th>Apellido</th><th>Año</th><th>Curso</th><th>Horario</th><th>Materia</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 
+  box.querySelectorAll('[data-view-docente]').forEach(b => {
+    b.addEventListener('click', () => {
+      document.getElementById('teacherOverlay').classList.remove('open');
+      openDocenteProfile(node, b.getAttribute('data-view-docente'));
+    });
+  });
   box.querySelectorAll('[data-edit-docente]').forEach(b => {
     b.addEventListener('click', () => {
       editingDocenteId = b.getAttribute('data-edit-docente');
@@ -2004,6 +2152,82 @@ function openDocenteRoster(node){
   setTimeout(() => document.getElementById('qtNombre').focus(), 30);
 }
 
+// Full profile for one entry in a card's docente list — same idea as a
+// regular cargo profile (photo, tasks, "depende de"), just scoped to a
+// record inside node.docentes instead of a separate canvas card.
+function openDocenteProfile(node, docenteId){
+  const d = (node.docentes||[]).find(x => x.id === docenteId);
+  if(!d) return;
+  const name = `${d.nombre||''} ${d.apellido||''}`.trim() || '(sin nombre)';
+  const cargo = d.materia ? `Docente de ${d.materia}` : 'Docente';
+  const photoHtml = d.photo
+    ? `<img src="${d.photo}" class="avatar-circle" style="width:52px; height:52px;">`
+    : `<div class="avatar-placeholder" style="width:52px; height:52px; font-size:15px;">${escapeHtml(initialsOf(name))}</div>`;
+
+  document.getElementById('profileModalContent').innerHTML = `
+    <div class="profile-header">
+      ${photoHtml}
+      <div>
+        <div class="profile-name">${escapeHtml(name)}</div>
+        <div class="profile-people">${escapeHtml(cargo)}</div>
+      </div>
+    </div>
+    <div class="profile-section">
+      <h4>Depende de</h4>
+      <div style="font-size:13.5px;">${escapeHtml(node.name)}</div>
+    </div>
+    <div class="profile-section">
+      <h4>Datos y tareas <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--ink-soft);">(editable acá mismo)</span></h4>
+      <div class="profile-edit-block">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+          ${photoHtml}
+          <input type="file" id="pfdPhotoInput" accept="image/*" style="flex:1; font-size:12px;">
+        </div>
+        <div class="mini-fields-row">
+          <input class="pfd-anio" type="text" placeholder="Año de ingreso" value="${escapeHtml(d.anio||'')}">
+          <input class="pfd-materia" type="text" placeholder="Materia" value="${escapeHtml(d.materia||'')}">
+        </div>
+        <div class="mini-fields-row">
+          <input class="pfd-curso" type="text" placeholder="Curso" value="${escapeHtml(d.curso||'')}">
+          <input class="pfd-horario" type="text" placeholder="Horario (días y horas)" value="${escapeHtml(d.horario||'')}">
+        </div>
+        <textarea class="pfd-tasks" placeholder="Tareas, una por línea">${escapeHtml(d.tasks||'')}</textarea>
+      </div>
+      <button type="button" class="btn btn-primary" id="btnSaveDocenteProfile" style="margin-top:4px; width:100%;">Guardar cambios</button>
+    </div>
+    <div class="profile-actions">
+      <button type="button" class="btn btn-ghost" id="btnCloseProfile">Cerrar</button>
+    </div>
+  `;
+  document.getElementById('profileOverlay').classList.add('open');
+  document.getElementById('btnCloseProfile').addEventListener('click', closeProfile);
+  document.getElementById('pfdPhotoInput').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      d.photo = await readAndResizeImage(file);
+      await saveState();
+      render();
+      openDocenteProfile(node, docenteId); // refresh to show the new photo
+      toast('Foto actualizada.');
+    }catch(err){
+      console.error(err);
+      toast('No se pudo leer esa imagen.');
+    }
+  });
+  document.getElementById('btnSaveDocenteProfile').addEventListener('click', async () => {
+    const block = document.querySelector('.profile-edit-block');
+    d.anio = block.querySelector('.pfd-anio').value.trim();
+    d.materia = block.querySelector('.pfd-materia').value.trim();
+    d.curso = block.querySelector('.pfd-curso').value.trim();
+    d.horario = block.querySelector('.pfd-horario').value.trim();
+    d.tasks = block.querySelector('.pfd-tasks').value.trim() || null;
+    await saveState();
+    render();
+    toast('Perfil actualizado.');
+  });
+}
+
 async function addDocenteRow(){
   const node = docenteTargetNodeId ? nodeById(docenteTargetNodeId) : null;
   if(!node){ toast('No se encontró la tarjeta de destino — cerrá esta ventana y volvé a intentar.'); return; }
@@ -2016,7 +2240,7 @@ async function addDocenteRow(){
   if(!nombre && !apellido){ toast('Poné al menos el nombre.'); return; }
 
   node.docentes = node.docentes || [];
-  node.docentes.push({ id: uid(), nombre, apellido, anio, curso, horario, materia });
+  node.docentes.push({ id: uid(), nombre, apellido, anio, curso, horario, materia, tasks: null, photo: null });
   await saveState();
   render();
 
@@ -2098,6 +2322,7 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
     node.name = name; node.role = role; node.role2 = role2 || null; node.parentId = parentId;
     node.secondaryParentIds = secondaryParentIds; node.area = area; node.teams = teams; node.rank = rank;
     node.tasks = tasks; node.startYear = startYear; node.subject = subject; node.courses = courses; node.schedule = schedule;
+    if(pendingPhotoDataUrl !== undefined) node.photo = pendingPhotoDataUrl;
   } else if(bulkNames.length){
     bulkNames.forEach(line => {
       const pos = newNodePosition(parentId);
@@ -2112,17 +2337,17 @@ document.getElementById('nodeForm').addEventListener('submit', async e => {
           id: uid(), name: cargoName, role: personName, role2: null, parentId,
           secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks,
           startYear: lineYear, subject: lineSubject, courses: lineCourses, schedule,
-          pinned: false, x: pos.x, y: pos.y
+          photo: null, pinned: false, x: pos.x, y: pos.y
         });
       } else {
-        state.nodes.push({ id: uid(), name: line, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks, startYear, subject, courses, schedule, pinned: false, x: pos.x, y: pos.y });
+        state.nodes.push({ id: uid(), name: line, role: '', role2: null, parentId, secondaryParentIds: [...secondaryParentIds], area, teams: [...teams], rank, tasks, startYear, subject, courses, schedule, photo: null, pinned: false, x: pos.x, y: pos.y });
       }
     });
     toast(`${bulkNames.length} cargos agregados, todos al mismo nivel.`);
   } else {
     if(!name){ toast('Poné un nombre, o usá el campo de varios cargos.'); return; }
     const pos = newNodePosition(parentId);
-    state.nodes.push({ id: uid(), name, role, role2: role2 || null, parentId, secondaryParentIds, area, teams, rank, tasks, startYear, subject, courses, schedule, pinned: false, x: pos.x, y: pos.y });
+    state.nodes.push({ id: uid(), name, role, role2: role2 || null, parentId, secondaryParentIds, area, teams, rank, tasks, startYear, subject, courses, schedule, photo: pendingPhotoDataUrl || null, pinned: false, x: pos.x, y: pos.y });
   }
   teams.forEach(t => compactTeamIfScattered(t));
   await saveState();
@@ -2354,6 +2579,81 @@ document.getElementById('fileImport').addEventListener('change', e => {
     e.target.value = '';
   };
   reader.readAsText(file);
+});
+
+/* ---------- Perfiles tab: every person in one alphabetical directory ---------- */
+// Gathers everyone loaded anywhere in the org chart: the main person on each
+// cargo, a second person if the card has one (role2), and every docente
+// tucked inside any card's embedded list.
+function getAllPeople(){
+  const people = [];
+  state.nodes.forEach(n => {
+    if(n.role && n.role.trim()){
+      people.push({ type:'cargo', nodeId:n.id, name:n.role.trim(), cargo:n.name, photo:n.photo||null });
+    }
+    if(n.role2 && n.role2.trim()){
+      people.push({ type:'cargo', nodeId:n.id, name:n.role2.trim(), cargo:n.name, photo:n.photo||null });
+    }
+    (n.docentes||[]).forEach(d => {
+      const full = `${d.nombre||''} ${d.apellido||''}`.trim();
+      if(full){
+        people.push({ type:'docente', nodeId:n.id, docenteId:d.id, name:full, cargo:d.materia ? `Docente de ${d.materia}` : 'Docente', photo:d.photo||null });
+      }
+    });
+  });
+  people.sort((a,b) => a.name.localeCompare(b.name, 'es', { sensitivity:'base' }));
+  return people;
+}
+
+function renderProfilesView(filterText){
+  const listEl = document.getElementById('profilesList');
+  let people = getAllPeople();
+  if(filterText && filterText.trim()){
+    const q = filterText.trim().toLowerCase();
+    people = people.filter(p => p.name.toLowerCase().includes(q) || p.cargo.toLowerCase().includes(q));
+  }
+  if(!people.length){
+    listEl.innerHTML = `<div class="profile-empty">No hay personas cargadas todavía.</div>`;
+    return;
+  }
+  listEl.innerHTML = people.map(p => `
+    <div class="profiles-list-row" data-ptype="${p.type}" data-node="${p.nodeId}" ${p.docenteId ? `data-docente="${p.docenteId}"` : ''}>
+      ${p.photo
+        ? `<img src="${p.photo}" class="avatar-circle" style="width:40px; height:40px;">`
+        : `<div class="avatar-placeholder" style="width:40px; height:40px; font-size:12px;">${escapeHtml(initialsOf(p.name))}</div>`}
+      <div>
+        <div class="profiles-row-name">${escapeHtml(p.name)}</div>
+        <div class="profiles-row-cargo">${escapeHtml(p.cargo)}</div>
+      </div>
+    </div>
+  `).join('');
+  listEl.querySelectorAll('.profiles-list-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const nodeId = row.getAttribute('data-node');
+      if(row.getAttribute('data-ptype') === 'docente'){
+        const node = nodeById(nodeId);
+        if(node) openDocenteProfile(node, row.getAttribute('data-docente'));
+      } else {
+        openProfile(nodeId);
+      }
+    });
+  });
+}
+
+document.getElementById('profilesSearch').addEventListener('input', e => renderProfilesView(e.target.value));
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const view = btn.getAttribute('data-view');
+    document.getElementById('canvasWrap').style.display = view === 'chart' ? '' : 'none';
+    document.getElementById('profilesView').style.display = view === 'profiles' ? '' : 'none';
+    if(view === 'profiles'){
+      document.getElementById('profilesSearch').value = '';
+      renderProfilesView('');
+    }
+  });
 });
 
 (async function init(){
