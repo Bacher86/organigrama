@@ -326,7 +326,6 @@
         </div>
       </div>
       <button class="btn btn-ghost" id="btnReset">Reiniciar</button>
-      <button class="btn btn-ghost" id="btnOpenTeacher">🍎 Agregar docentes</button>
       <button class="btn btn-primary" id="btnAddRoot">+ Agregar cargo</button>
     </div>
   </header>
@@ -438,31 +437,10 @@
 
 <div class="overlay" id="teacherOverlay">
   <div class="modal" style="width:430px;">
-    <h3>Agregar docentes</h3>
+    <h3 id="teacherModalTitle">Lista de docentes</h3>
     <div class="field">
-      <label for="qtParentLevel">Nivel / equipo (para achicar la lista de abajo)</label>
-      <select id="qtParentLevel"></select>
-    </div>
-    <div class="field">
-      <label for="qtParent">Depende de</label>
-      <select id="qtParent"></select>
-    </div>
-    <div class="field">
-      <label for="qtNivelPreset">Nivel / ciclo</label>
-      <select id="qtNivelPreset">
-        <option value="">— Elegir nivel —</option>
-        <option value="Docentes Jardín">Jardín</option>
-        <option value="Docentes Primaria 1er Ciclo">Primaria 1er Ciclo</option>
-        <option value="Docentes Primaria 2do Ciclo">Primaria 2do Ciclo</option>
-        <option value="Docentes Secundaria Varones">Secundaria Varones</option>
-        <option value="Docentes Secundaria Mujeres">Secundaria Mujeres</option>
-        <option value="__custom__">Otro (escribir abajo)…</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="qtTeam">Equipo</label>
-      <input id="qtTeam" type="text" list="teamOptions" placeholder="Se completa solo al elegir un nivel arriba">
-      <div class="field-note">Elegí un nivel arriba y este campo se completa solo — así todos los que cargues a continuación quedan agrupados exactos, sin errores de tipeo. Cambiá el nivel cuando pases a cargar el siguiente grupo.</div>
+      <label>Docentes cargados acá (<span id="qtCount">0</span>)</label>
+      <div class="sub-list" id="qtList"><div class="sub-list-empty">Todavía no hay ninguno cargado.</div></div>
     </div>
     <hr style="border:none; border-top:1px solid var(--line); margin:16px 0;">
     <div class="field">
@@ -487,11 +465,6 @@
       </div>
     </div>
     <button type="button" class="btn btn-primary" id="btnAddTeacherRow" style="width:100%; margin-top:4px;">+ Cargar docente</button>
-
-    <div class="field" style="margin-top:18px;">
-      <label>Docentes cargados ahora (<span id="qtCount">0</span>)</label>
-      <div class="sub-list" id="qtList"><div class="sub-list-empty">Todavía no cargaste ninguno.</div></div>
-    </div>
     <div class="modal-actions">
       <div></div>
       <div class="right">
@@ -754,6 +727,7 @@ function migrateState(){
     if(n.subject === undefined) n.subject = null;
     if(n.courses === undefined) n.courses = null;
     if(n.schedule === undefined) n.schedule = null;
+    if(!Array.isArray(n.docentes)) n.docentes = [];
     delete n.team;
   });
   if(!Array.isArray(state.collapsedTeams)) state.collapsedTeams = [];
@@ -903,10 +877,12 @@ function render(){
           <div class="card-actions">
             <button class="icon-btn${node.pinned ? ' pin-active' : ''}" data-action="pin" data-id="${node.id}" title="${node.pinned ? 'Desfijar (permitir moverla)' : 'Fijar (que no se mueva sola)'}">${node.pinned ? '📌' : '📍'}</button>
             <button class="icon-btn" data-action="profile" data-id="${node.id}" title="Ver perfil">👤</button>
+            <button class="icon-btn" data-action="docentes" data-id="${node.id}" title="Ver / agregar lista de docentes acá">📋</button>
             <button class="icon-btn" data-action="dup" data-id="${node.id}" title="Duplicar">⎘</button>
             <button class="icon-btn" data-action="add" data-id="${node.id}" title="Agregar subordinado">+</button>
             <button class="icon-btn" data-action="edit" data-id="${node.id}" title="Editar">✎</button>
           </div>
+          ${(node.docentes||[]).length ? `<div style="font-size:10px; color:var(--ink-soft); font-weight:600; margin-bottom:2px;">📋 ${node.docentes.length} docente${node.docentes.length===1?'':'s'}</div>` : ''}
           <div class="name">${isTeacherTeamCard ? '🍎 ' : ''}${escapeHtml(node.name)}</div>
           ${node.role ? `<div class="role">${escapeHtml(node.role)}</div>` : ''}
           ${node.role2 ? `<div class="role">${escapeHtml(node.role2)}</div>` : ''}
@@ -926,6 +902,13 @@ function render(){
   });
   content.querySelectorAll('[data-action="profile"]').forEach(b=>{
     b.addEventListener('click', e => { e.stopPropagation(); openProfile(b.getAttribute('data-id')); });
+  });
+  content.querySelectorAll('[data-action="docentes"]').forEach(b=>{
+    b.addEventListener('click', e => {
+      e.stopPropagation();
+      const node = nodeById(b.getAttribute('data-id'));
+      if(node) openDocenteRoster(node);
+    });
   });
   content.querySelectorAll('[data-action="pin"]').forEach(b=>{
     b.addEventListener('click', async e => {
@@ -1821,7 +1804,6 @@ function openProfile(nodeId){
     <div class="profile-section">
       <h4>Compañeros de equipo — ${escapeHtml(homeTeam)}</h4>
       ${teammatesHtml}
-      <button type="button" class="btn btn-ghost" id="btnQuickAddToTeam" style="margin-top:8px; width:100%;">🍎 Agregar otro docente a "${escapeHtml(homeTeam)}"</button>
     </div>` : ''}
     <div class="profile-section">
       <h4>Datos y tareas <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--ink-soft);">(editable acá mismo)</span></h4>
@@ -1839,13 +1821,6 @@ function openProfile(nodeId){
     closeProfile();
     openModal(nodeId, null);
   });
-  const btnQuickAddToTeam = document.getElementById('btnQuickAddToTeam');
-  if(btnQuickAddToTeam){
-    btnQuickAddToTeam.addEventListener('click', () => {
-      closeProfile();
-      openTeacherQuickAddFor(node);
-    });
-  }
   document.getElementById('btnSaveProfileFields').addEventListener('click', async () => {
     document.querySelectorAll('.profile-edit-block').forEach(block => {
       const pn = nodeById(block.getAttribute('data-node'));
@@ -1891,7 +1866,6 @@ function openTeamRoster(team){
       <h4>Lista completa</h4>
       ${rows || '<div class="profile-empty">Todavía no hay nadie cargado en este equipo.</div>'}
     </div>
-    <button type="button" class="btn btn-primary" id="btnRosterAdd" style="width:100%; margin-top:4px;">🍎 Agregar docente a "${escapeHtml(team)}"</button>
     <div class="profile-actions">
       <button type="button" class="btn btn-ghost" id="btnCloseProfile">Cerrar</button>
     </div>
@@ -1901,93 +1875,97 @@ function openTeamRoster(team){
   document.querySelectorAll('[data-view-member]').forEach(el => {
     el.addEventListener('click', () => { closeProfile(); openProfile(el.getAttribute('data-view-member')); });
   });
-  document.getElementById('btnRosterAdd').addEventListener('click', () => {
-    closeProfile();
-    const leader = teamLeader(members);
-    openTeacherModal(leader ? (leader.parentId || '') : '', team);
-  });
 }
 
 document.getElementById('profileOverlay').addEventListener('click', e => { if(e.target.id === 'profileOverlay') closeProfile(); });
 
-/* ---------- quick teacher entry ---------- */
-let teacherBatch = []; // ids added in this modal session, for the running list
+/* ---------- docente roster embedded in a single card ---------- */
+// Teachers now live INSIDE whichever card you were on (node.docentes[]) —
+// nothing new gets added to the org chart canvas. Click a card, press
+// Shift+D (or use its 📋 button), and the list you see/add is that card's own.
+let docenteTargetNodeId = null;
 
-function renderTeacherList(){
+function renderDocenteList(node){
   const box = document.getElementById('qtList');
-  document.getElementById('qtCount').textContent = teacherBatch.length;
-  if(!teacherBatch.length){
-    box.innerHTML = `<div class="sub-list-empty">Todavía no cargaste ninguno.</div>`;
+  const list = node.docentes || [];
+  document.getElementById('qtCount').textContent = list.length;
+  if(!list.length){
+    box.innerHTML = `<div class="sub-list-empty">Todavía no hay ninguno cargado.</div>`;
     return;
   }
-  box.innerHTML = teacherBatch.map(id => {
-    const n = nodeById(id);
-    if(!n) return '';
-    const detail = [n.subject, n.courses].filter(Boolean).join(' — ');
-    return `<label style="justify-content:space-between;">
-      <span>${escapeHtml(n.role || '(sin nombre)')}${detail ? ` <span style="color:var(--ink-soft); font-weight:400;">(${escapeHtml(detail)})</span>` : ''}</span>
-      <button type="button" class="icon-btn" data-remove-teacher="${n.id}" title="Sacar de la lista">✕</button>
+  box.innerHTML = list.map(d => {
+    const detail = [d.materia, d.curso, d.horario, d.anio ? `Ingreso ${d.anio}` : null].filter(Boolean).join(' · ');
+    return `<label style="justify-content:space-between; align-items:flex-start;">
+      <span><strong>${escapeHtml(`${d.nombre} ${d.apellido}`.trim() || '(sin nombre)')}</strong>${detail ? `<br><span style="color:var(--ink-soft); font-weight:400; font-size:12px;">${escapeHtml(detail)}</span>` : ''}</span>
+      <button type="button" class="icon-btn" data-remove-docente="${d.id}" title="Sacar de la lista">✕</button>
     </label>`;
   }).join('');
-  box.querySelectorAll('[data-remove-teacher]').forEach(b => {
+  box.querySelectorAll('[data-remove-docente]').forEach(b => {
     b.addEventListener('click', async () => {
-      const id = b.getAttribute('data-remove-teacher');
-      state.nodes = state.nodes.filter(n => n.id !== id);
-      teacherBatch = teacherBatch.filter(tid => tid !== id);
+      const did = b.getAttribute('data-remove-docente');
+      node.docentes = (node.docentes || []).filter(d => d.id !== did);
       await saveState();
       render();
-      renderTeacherList();
+      renderDocenteList(node);
       toast('Docente sacado de la lista.');
     });
   });
 }
 
-function clearTeacherFields(){
+function clearDocenteFields(){
   ['qtNombre','qtApellido','qtAnio','qtCurso','qtHorario','qtMateria'].forEach(id => document.getElementById(id).value = '');
 }
 
-let lastTeacherParent = '';
-let lastTeacherPreset = '';
-let lastTeacherTeam = '';
-
-const TEACHER_PRESETS = ['Docentes Jardín','Docentes Primaria 1er Ciclo','Docentes Primaria 2do Ciclo','Docentes Secundaria Varones','Docentes Secundaria Mujeres'];
-
-function openTeacherModal(parentValue, teamValue){
-  teacherBatch = [];
-  renderTeacherList();
-
-  const levelSel = document.getElementById('qtParentLevel');
-  const personSel = document.getElementById('qtParent');
-  populateLevelSelect(levelSel);
-  const tryLevel = teamValue || '__all__';
-  levelSel.value = [...levelSel.options].some(o => o.value === tryLevel) ? tryLevel : '__all__';
-  populatePersonSelectForLevel(levelSel, personSel, null);
-  const hasParentOption = [...personSel.options].some(o => o.value === (parentValue || ''));
-  if(!hasParentOption && levelSel.value !== '__all__'){
-    levelSel.value = '__all__';
-    populatePersonSelectForLevel(levelSel, personSel, null);
-  }
-  personSel.value = parentValue || '';
-  levelSel.onchange = () => populatePersonSelectForLevel(levelSel, personSel, null);
-
-  populateTeamOptions();
-  document.getElementById('qtTeam').value = teamValue;
-  document.getElementById('qtNivelPreset').value = TEACHER_PRESETS.includes(teamValue) ? teamValue : (teamValue ? '__custom__' : '');
-  clearTeacherFields();
+// Opens the roster for a specific card — this is THE way to add/view
+// docentes now, whether triggered by the 📋 button or by Shift+D.
+function openDocenteRoster(node){
+  docenteTargetNodeId = node.id;
+  document.getElementById('teacherModalTitle').textContent = `Lista de docentes — ${node.name}`;
+  renderDocenteList(node);
+  clearDocenteFields();
   document.getElementById('teacherOverlay').classList.add('open');
   setTimeout(() => document.getElementById('qtNombre').focus(), 30);
 }
 
-// Opens the quick-add form already locked to this node's own superior and
-// team, so adding "one more like this" needs zero re-selection.
-function openTeacherQuickAddFor(node){
-  openTeacherModal(node.parentId || '', (node.teams||[])[0] || '');
+async function addDocenteRow(){
+  const node = docenteTargetNodeId ? nodeById(docenteTargetNodeId) : null;
+  if(!node){ toast('No se encontró la tarjeta de destino — cerrá esta ventana y volvé a intentar.'); return; }
+  const nombre = document.getElementById('qtNombre').value.trim();
+  const apellido = document.getElementById('qtApellido').value.trim();
+  const anio = document.getElementById('qtAnio').value.trim();
+  const curso = document.getElementById('qtCurso').value.trim();
+  const horario = document.getElementById('qtHorario').value.trim();
+  const materia = document.getElementById('qtMateria').value.trim();
+  if(!nombre && !apellido){ toast('Poné al menos el nombre.'); return; }
+
+  node.docentes = node.docentes || [];
+  node.docentes.push({ id: uid(), nombre, apellido, anio, curso, horario, materia });
+  await saveState();
+  render();
+
+  renderDocenteList(node);
+  clearDocenteFields();
+  toast(`"${`${nombre} ${apellido}`.trim()}" agregado a "${node.name}".`);
+  document.getElementById('qtNombre').focus();
 }
+document.getElementById('btnAddTeacherRow').addEventListener('click', addDocenteRow);
+document.getElementById('teacherOverlay').addEventListener('keydown', e => {
+  if(e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.closest('.modal')){
+    e.preventDefault();
+    addDocenteRow();
+  }
+});
+document.getElementById('btnCloseTeacherModal').addEventListener('click', () => {
+  document.getElementById('teacherOverlay').classList.remove('open');
+});
+document.getElementById('teacherOverlay').addEventListener('click', e => {
+  if(e.target.id === 'teacherOverlay') document.getElementById('teacherOverlay').classList.remove('open');
+});
 
 /* ---------- click-to-focus + Shift+D shortcut ---------- */
-// Click any card, then press Shift+D: opens the quick teacher-add form
-// locked to THAT card's exact team string (copied, never retyped) — this is
-// the fix for teachers landing in a brand-new group instead of the right one.
+// Click any card, then press Shift+D: opens that exact card's own docente
+// list (view + add), so everything you load stays right where you clicked —
+// no new card ever gets created.
 let kbdFocusedNodeId = null;
 document.getElementById('canvasContent').addEventListener('click', e => {
   const wrap = e.target.closest('.card-wrap');
@@ -2004,81 +1982,9 @@ document.addEventListener('keydown', e => {
   if(e.shiftKey && e.key.toLowerCase() === 'd'){
     e.preventDefault();
     const node = kbdFocusedNodeId ? nodeById(kbdFocusedNodeId) : null;
-    if(node){
-      openTeacherQuickAddFor(node);
-    } else {
-      toast('Primero hacé clic en una tarjeta del equipo correcto, después Shift+D.');
-    }
+    if(node) openDocenteRoster(node);
+    else toast('Primero hacé clic en la tarjeta correcta, después Shift+D.');
   }
-});
-
-document.getElementById('btnOpenTeacher').addEventListener('click', () => {
-  // remember the last "Depende de" / nivel used, so reopening the modal for
-  // another batch doesn't silently reset it and leave someone unassigned
-  openTeacherModal(lastTeacherParent, lastTeacherTeam);
-});
-document.getElementById('qtNivelPreset').addEventListener('change', () => {
-  const val = document.getElementById('qtNivelPreset').value;
-  const teamInput = document.getElementById('qtTeam');
-  if(val === '__custom__'){
-    teamInput.value = '';
-    teamInput.focus();
-  } else if(val){
-    teamInput.value = val;
-  }
-});
-
-async function addTeacherRow(){
-  const nombre = document.getElementById('qtNombre').value.trim();
-  const apellido = document.getElementById('qtApellido').value.trim();
-  const anio = document.getElementById('qtAnio').value.trim();
-  const curso = document.getElementById('qtCurso').value.trim();
-  const horario = document.getElementById('qtHorario').value.trim();
-  const materia = document.getElementById('qtMateria').value.trim();
-  const personName = `${nombre} ${apellido}`.trim();
-  if(!personName){ toast('Poné al menos el nombre.'); return; }
-
-  const parentId = document.getElementById('qtParent').value || null;
-  const teamText = document.getElementById('qtTeam').value.trim();
-  if(!teamText){
-    if(!confirm('No elegiste un Nivel/Equipo. Este docente se va a crear, pero NO va a aparecer agrupado en ningún recuadro. ¿Cargarlo igual sin equipo?')) return;
-  }
-  lastTeacherParent = document.getElementById('qtParent').value;
-  lastTeacherPreset = document.getElementById('qtNivelPreset').value;
-  lastTeacherTeam = teamText;
-
-  const teams = teamText ? [teamText] : [];
-  const cargoName = materia ? `Docente de ${materia}` : 'Docente';
-  const pos = newNodePosition(parentId);
-  const node = {
-    id: uid(), name: cargoName, role: personName, role2: null, parentId,
-    secondaryParentIds: [], area: null, teams, rank: null, tasks: null,
-    startYear: anio || null, subject: materia || null, courses: curso || null, schedule: horario || null,
-    pinned: false, x: pos.x, y: pos.y
-  };
-  state.nodes.push(node);
-  if(teams.length) compactTeamIfScattered(teams[0]);
-  await saveState();
-  render();
-
-  teacherBatch.push(node.id);
-  renderTeacherList();
-  clearTeacherFields();
-  toast(teams.length ? `"${personName}" agregado a "${teamText}".` : `"${personName}" agregado sin equipo.`);
-  document.getElementById('qtNombre').focus();
-}
-document.getElementById('btnAddTeacherRow').addEventListener('click', addTeacherRow);
-document.getElementById('teacherOverlay').addEventListener('keydown', e => {
-  if(e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.closest('.modal') && !e.target.id.startsWith('qtParent')){
-    e.preventDefault();
-    addTeacherRow();
-  }
-});
-document.getElementById('btnCloseTeacherModal').addEventListener('click', () => {
-  document.getElementById('teacherOverlay').classList.remove('open');
-});
-document.getElementById('teacherOverlay').addEventListener('click', e => {
-  if(e.target.id === 'teacherOverlay') document.getElementById('teacherOverlay').classList.remove('open');
 });
 
 document.getElementById('fParent').addEventListener('change', () => populateSecondaryList(editingId));
