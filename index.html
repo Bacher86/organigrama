@@ -126,6 +126,7 @@
   .card-wrap.dragging{ z-index:30; }
   .card-wrap.pinned .card{ box-shadow: 0 0 0 2px var(--ink); cursor:default; }
   .card-wrap.pinned .card:hover{ box-shadow: 0 0 0 2px var(--ink); }
+  .card-wrap.kbd-focused .card{ outline: 2px dashed var(--c1); outline-offset: 2px; }
   .icon-btn.pin-active{ background:var(--ink); color:#fff; }
   .card-wrap.link-target .card{ outline:2px solid var(--c1); outline-offset:2px; }
   .card{
@@ -407,6 +408,10 @@
         <textarea id="fTasks" placeholder="Ej:&#10;Coordinar reuniones de equipo&#10;Supervisar planificación pedagógica&#10;Atender consultas de familias"></textarea>
       </div>
       <div class="field">
+        <label for="fParentLevel">Nivel / equipo (para achicar la lista)</label>
+        <select id="fParentLevel"></select>
+      </div>
+      <div class="field">
         <label for="fParent">Superior principal (línea sólida)</label>
         <select id="fParent"></select>
         <div class="field-note">Este define la posición del cargo en el organigrama. Elegí el más "estructural" de sus superiores.</div>
@@ -434,6 +439,10 @@
 <div class="overlay" id="teacherOverlay">
   <div class="modal" style="width:430px;">
     <h3>Agregar docentes</h3>
+    <div class="field">
+      <label for="qtParentLevel">Nivel / equipo (para achicar la lista de abajo)</label>
+      <select id="qtParentLevel"></select>
+    </div>
     <div class="field">
       <label for="qtParent">Depende de</label>
       <select id="qtParent"></select>
@@ -887,8 +896,9 @@ function render(){
       return `<span class="mini-team-chip${isPrimary ? ' primary' : ''}" style="${style}" title="${isPrimary ? 'Equipo principal' : 'También pertenece a'}">${escapeHtml(t)}</span>`;
     }).join('');
     const isTeacherTeamCard = node.name.trim().toLowerCase() === 'equipo docente';
+    const isKbdFocused = kbdFocusedNodeId === node.id;
     cardsHtml += `
-      <div class="card-wrap${dimmed ? ' dimmed' : ''}${isMatch ? ' search-match' : ''}${node.pinned ? ' pinned' : ''}" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
+      <div class="card-wrap${dimmed ? ' dimmed' : ''}${isMatch ? ' search-match' : ''}${node.pinned ? ' pinned' : ''}${isKbdFocused ? ' kbd-focused' : ''}" data-id="${node.id}" style="left:${node.x}px; top:${node.y}px;">
         <div class="card" style="border-left-color:${colorVar(depth)}">
           <div class="card-actions">
             <button class="icon-btn${node.pinned ? ' pin-active' : ''}" data-action="pin" data-id="${node.id}" title="${node.pinned ? 'Desfijar (permitir moverla)' : 'Fijar (que no se mueva sola)'}">${node.pinned ? '📌' : '📍'}</button>
@@ -1554,15 +1564,42 @@ document.addEventListener('pointerup', async e => {
 });
 
 /* ---------- modal ---------- */
-function populateParentSelect(excludeId){
-  const sel = document.getElementById('fParent');
+// Two-stage picker: first narrow down by "Nivel/Equipo", then the person
+// select only shows cargos within that level — instead of one giant flat
+// list with everyone mixed together.
+function populateLevelSelect(levelSel){
+  const teams = [...new Set(state.nodes.flatMap(n => n.teams||[]).map(t => t.trim()).filter(Boolean))].sort();
+  let html = '<option value="__all__">— Todos los cargos —</option>';
+  teams.forEach(t => { html += `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`; });
+  html += '<option value="__none__">— Cargos sin equipo asignado —</option>';
+  levelSel.innerHTML = html;
+}
+function populatePersonSelectForLevel(levelSel, personSel, excludeId){
+  const level = levelSel.value || '__all__';
   const banned = new Set(excludeId ? [excludeId, ...descendantsOf(excludeId)] : []);
+  let candidates;
+  if(level === '__all__') candidates = state.nodes.filter(n => !banned.has(n.id));
+  else if(level === '__none__') candidates = state.nodes.filter(n => !banned.has(n.id) && !(n.teams && n.teams.length));
+  else candidates = state.nodes.filter(n => !banned.has(n.id) && (n.teams||[])[0] === level);
+
   const options = ['<option value="">— Nivel superior (raíz) —</option>'];
-  state.nodes.forEach(n => {
-    if(banned.has(n.id)) return;
-    options.push(`<option value="${n.id}">${'—'.repeat(depthOf(n.id))} ${escapeHtml(n.name)}</option>`);
+  candidates.forEach(n => {
+    const label = n.role ? `${n.name} — ${n.role}` : n.name;
+    options.push(`<option value="${n.id}">${'—'.repeat(depthOf(n.id))} ${escapeHtml(label)}</option>`);
   });
-  sel.innerHTML = options.join('');
+  personSel.innerHTML = options.join('');
+}
+function setupCascadingParentPicker(levelSelId, personSelId, excludeId){
+  const levelSel = document.getElementById(levelSelId);
+  const personSel = document.getElementById(personSelId);
+  populateLevelSelect(levelSel);
+  levelSel.value = '__all__';
+  populatePersonSelectForLevel(levelSel, personSel, excludeId);
+  levelSel.onchange = () => populatePersonSelectForLevel(levelSel, personSel, excludeId);
+}
+
+function populateParentSelect(excludeId){
+  setupCascadingParentPicker('fParentLevel', 'fParent', excludeId);
 }
 
 function populateSecondaryList(nodeId){
@@ -1876,14 +1913,6 @@ document.getElementById('profileOverlay').addEventListener('click', e => { if(e.
 /* ---------- quick teacher entry ---------- */
 let teacherBatch = []; // ids added in this modal session, for the running list
 
-function fillGenericParentSelect(selectEl){
-  const options = ['<option value="">— Nivel superior (raíz) —</option>'];
-  state.nodes.forEach(n => {
-    options.push(`<option value="${n.id}">${'—'.repeat(depthOf(n.id))} ${escapeHtml(n.name)}</option>`);
-  });
-  selectEl.innerHTML = options.join('');
-}
-
 function renderTeacherList(){
   const box = document.getElementById('qtList');
   document.getElementById('qtCount').textContent = teacherBatch.length;
@@ -1926,9 +1955,22 @@ const TEACHER_PRESETS = ['Docentes Jardín','Docentes Primaria 1er Ciclo','Docen
 function openTeacherModal(parentValue, teamValue){
   teacherBatch = [];
   renderTeacherList();
-  fillGenericParentSelect(document.getElementById('qtParent'));
+
+  const levelSel = document.getElementById('qtParentLevel');
+  const personSel = document.getElementById('qtParent');
+  populateLevelSelect(levelSel);
+  const tryLevel = teamValue || '__all__';
+  levelSel.value = [...levelSel.options].some(o => o.value === tryLevel) ? tryLevel : '__all__';
+  populatePersonSelectForLevel(levelSel, personSel, null);
+  const hasParentOption = [...personSel.options].some(o => o.value === (parentValue || ''));
+  if(!hasParentOption && levelSel.value !== '__all__'){
+    levelSel.value = '__all__';
+    populatePersonSelectForLevel(levelSel, personSel, null);
+  }
+  personSel.value = parentValue || '';
+  levelSel.onchange = () => populatePersonSelectForLevel(levelSel, personSel, null);
+
   populateTeamOptions();
-  document.getElementById('qtParent').value = parentValue;
   document.getElementById('qtTeam').value = teamValue;
   document.getElementById('qtNivelPreset').value = TEACHER_PRESETS.includes(teamValue) ? teamValue : (teamValue ? '__custom__' : '');
   clearTeacherFields();
@@ -1941,6 +1983,34 @@ function openTeacherModal(parentValue, teamValue){
 function openTeacherQuickAddFor(node){
   openTeacherModal(node.parentId || '', (node.teams||[])[0] || '');
 }
+
+/* ---------- click-to-focus + Shift+D shortcut ---------- */
+// Click any card, then press Shift+D: opens the quick teacher-add form
+// locked to THAT card's exact team string (copied, never retyped) — this is
+// the fix for teachers landing in a brand-new group instead of the right one.
+let kbdFocusedNodeId = null;
+document.getElementById('canvasContent').addEventListener('click', e => {
+  const wrap = e.target.closest('.card-wrap');
+  if(!wrap || e.target.closest('.card-actions') || e.target.closest('.link-handle')) return;
+  document.querySelectorAll('.card-wrap.kbd-focused').forEach(el => el.classList.remove('kbd-focused'));
+  wrap.classList.add('kbd-focused');
+  kbdFocusedNodeId = wrap.getAttribute('data-id');
+});
+document.addEventListener('keydown', e => {
+  const active = document.activeElement;
+  const tag = active ? active.tagName : '';
+  const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (active && active.isContentEditable);
+  if(isTyping) return; // don't hijack Shift+D while someone is just typing a capital D
+  if(e.shiftKey && e.key.toLowerCase() === 'd'){
+    e.preventDefault();
+    const node = kbdFocusedNodeId ? nodeById(kbdFocusedNodeId) : null;
+    if(node){
+      openTeacherQuickAddFor(node);
+    } else {
+      toast('Primero hacé clic en una tarjeta del equipo correcto, después Shift+D.');
+    }
+  }
+});
 
 document.getElementById('btnOpenTeacher').addEventListener('click', () => {
   // remember the last "Depende de" / nivel used, so reopening the modal for
